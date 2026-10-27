@@ -20,6 +20,8 @@ jobs:
           unzip -q "UsbPlayer (1).zip" -d /tmp/usbplayer-source
           cp -a /tmp/usbplayer-source/UsbPlayer/. .
           test -f app/build.gradle.kts -o -f app/build.gradle
+          mkdir -p app/src/main/java/com/example/usbplayer
+          cp patches/Library.kt app/src/main/java/com/example/usbplayer/Library.kt
           test -f settings.gradle.kts -o -f settings.gradle
 
       - name: Set up Java 17

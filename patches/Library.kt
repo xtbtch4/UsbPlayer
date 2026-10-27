@@ -15,7 +15,9 @@ data class Track(
     val genre: String = "",
     val year: Int = 0,
     val trackNo: Int = 0,
-    val albumArtist: String = ""
+    val albumArtist: String = "",
+    val art: String = "",
+    val albumId: Long = 0L
 )
 
 fun Track.albumKey() = "${album.ifEmpty { "Без альбома" }}\u0000${albumArtist.ifEmpty { artist }}"

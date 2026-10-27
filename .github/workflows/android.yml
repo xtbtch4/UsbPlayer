@@ -19,6 +19,8 @@ jobs:
         run: |
           unzip -q UsbPlayer.zip -d /tmp/usbplayer-source
           cp -a /tmp/usbplayer-source/UsbPlayer/. .
+          mkdir -p app/src/main/java/com/example/usbplayer
+          cp patches/Library.kt app/src/main/java/com/example/usbplayer/Library.kt
 
       - name: Set up Java 17
         uses: actions/setup-java@v4

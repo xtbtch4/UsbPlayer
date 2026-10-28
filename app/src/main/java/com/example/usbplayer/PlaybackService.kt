@@ -31,6 +31,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
+        Providers.qobuz.load(this)
         val factory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean
@@ -54,7 +55,8 @@ class PlaybackService : MediaSessionService() {
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
-            .setHandleAudioBecomingNoisy(true)            .build()
+            .setHandleAudioBecomingNoisy(true)
+            .build()
 
         player.addListener(object : Player.Listener {
             override fun onTracksChanged(tracks: Tracks) {

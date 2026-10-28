@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
     private val importEq = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             val text = contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() }.orEmpty()
-            val name = it.lastPathSegment?.substringAfterLast(&#x27;/&#x27;)?.removeSuffix(".txt") ?: "AutoEQ"
+            val name = it.lastPathSegment?.substringAfterLast('/')?.removeSuffix(".txt") ?: "AutoEQ"
             if (Eq.load(text, name)) AppState.reapply?.invoke() else AppState.message = "Не удалось разобрать профиль AutoEQ"
         }
     }
@@ -239,7 +239,7 @@ class MainActivity : ComponentActivity() {
                     1 -> if (openAlbum == null) {
                         LazyColumn {
                             items(albums) { (key, ts) ->
-                                val (alb, art) = key.split(&#x27;\u0000&#x27;)
+                                val (alb, art) = key.split('\u0000')
                                 ListItem(
                                     leadingContent = { Cover(ts.first(), 56.dp) },
                                     headlineContent = { Text(alb, maxLines = 1) },
@@ -404,5 +404,5 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Одиночный файл из проводника (в т.ч. DSF/DFF, которые MediaStore может не индексировать). */
-    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast(&#x27;/&#x27;) ?: "Файл", "", "", 0, uri)), 0)
+    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast('/') ?: "Файл", "", "", 0, uri)), 0)
 }

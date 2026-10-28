@@ -68,8 +68,8 @@ class QobuzProvider {
                 m.startsWith("Qobuz 401") || m.startsWith("Qobuz 403") -> {
                     token = null; throw IOException("Токен или app_id не приняты: $m")
                 }
-                m.startsWith("Qobuz ") -> {}   // другой ответ сервера: токен проверится при первом воспроизведении
-                else -> { token = null; throw e }   // сеть
+                m.startsWith("Qobuz ") -> {}
+                else -> { token = null; throw e }
             }
         }
         save(ctx)
@@ -104,7 +104,6 @@ class QobuzProvider {
         )
     }
 
-    /** Подборки главной: new-releases, most-streamed, press-awards, best-sellers, ideal-discography, qobuzissims, album-of-the-week. */
     fun featured(type: String, limit: Int = 24): List<QAlbum> =
         list(get("album/getFeatured", mapOf("type" to type, "limit" to limit.toString()))
             .optJSONObject("albums")?.optJSONArray("items")).map(::album)
@@ -119,22 +118,36 @@ class QobuzProvider {
     fun search(query: String): List<Track> =
         list(get("track/search", mapOf("query" to query, "limit" to "50")).optJSONObject("tracks")?.optJSONArray("items")).map { track(it) }
 
-    /** Общий поиск по каталогу: (альбомы, треки). */
     fun searchAll(query: String): Pair<List<QAlbum>, List<Track>> {
         val j = get("catalog/search", mapOf("query" to query, "limit" to "30"))
         return list(j.optJSONObject("albums")?.optJSONArray("items")).map(::album) to
             list(j.optJSONObject("tracks")?.optJSONArray("items")).map { track(it) }
     }
 
-    /** Прямая ссылка живёт недолго, поэтому получаем её в момент загрузки трека. */
-    fun streamUrl(trackId: String): String {
+    private fun fileUrl(trackId: String, fmt: Int): String {
         val ts = (System.currentTimeMillis() / 1000).toString()
-        val raw = "trackgetFileUrlformat_id${formatId}intentstreamtrack_id$trackId$ts$appSecret"
+        val raw = "trackgetFileUrlformat_id${fmt}intentstreamtrack_id$trackId$ts$appSecret"
         val sig = MessageDigest.getInstance("MD5").digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }
         return get("track/getFileUrl", mapOf(
-            "format_id" to formatId.toString(), "intent" to "stream",
+            "format_id" to fmt.toString(), "intent" to "stream",
             "track_id" to trackId, "request_ts" to ts, "request_sig" to sig
         )).getString("url")
+    }
+
+    fun streamUrl(trackId: String): String {
+        var first: IOException? = null
+        for (f in listOf(formatId, 27, 7, 6, 5).distinct()) {
+            try {
+                val u = fileUrl(trackId, f)
+                formatId = f
+                return u
+            } catch (e: IOException) {
+                if (first == null) first = e
+                val m = e.message.orEmpty()
+                if (!(m.startsWith("Qobuz 400") || m.startsWith("Qobuz 401") || m.startsWith("Qobuz 403") || m.startsWith("Qobuz 404"))) throw e
+            }
+        }
+        throw first ?: IOException("Qobuz: не удалось получить ссылку на трек")
     }
 }
 

@@ -47,7 +47,6 @@ object UsbDac {
     fun setBitPerfect(ctx: Context, dev: AudioDeviceInfo, wantRate: Int?, on: Boolean, exact: Boolean = false): BpResult {
         if (Build.VERSION.SDK_INT < 34) return BpResult(false, "нужен Android 14+")
         val am = ctx.getSystemService(AudioManager::class.java)
-        val F = android.media.AudioFormat
         return try {
             if (!on) {
                 am.clearPreferredMixerAttributes(attrs, dev)

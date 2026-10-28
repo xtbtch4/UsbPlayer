@@ -33,7 +33,7 @@ object Library {
                 val id = c.getLong(0)
                 out += Track(
                     id, c.getString(1) ?: "?", c.getString(2) ?: "Unknown", c.getString(3) ?: "",
-                    c.getLong(4), ContentUris.withAppendedId(m.EXTERNAL_CONTENT_URI, id),
+                    c.getLong(4), ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id),
                     year = c.getInt(5), trackNo = c.getInt(6),
                     albumId = c.getLong(7),
                     albumArtist = if (tagsExtra) c.getString(8) ?: "" else "",

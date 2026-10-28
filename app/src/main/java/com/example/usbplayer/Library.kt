@@ -17,14 +17,17 @@ fun Track.albumKey() = "${album.ifEmpty { "Без альбома" }}\u0000${albu
 
 object Library {
     fun load(ctx: Context): List<Track> {
-        val m = MediaStore.Audio.Media
-        val cols = mutableListOf(m._ID, m.TITLE, m.ARTIST, m.ALBUM, m.DURATION, m.YEAR, m.TRACK, m.ALBUM_ID)
+        val cols = mutableListOf(
+            MediaStore.Audio.Media._ID, MediaStore.Audio.Media.TITLE, MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM, MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.YEAR,
+            MediaStore.Audio.Media.TRACK, MediaStore.Audio.Media.ALBUM_ID
+        )
         val tagsExtra = Build.VERSION.SDK_INT >= 30
-        if (tagsExtra) { cols += m.ALBUM_ARTIST; cols += m.GENRE }
+        if (tagsExtra) { cols += MediaStore.Audio.AudioColumns.ALBUM_ARTIST; cols += MediaStore.Audio.AudioColumns.GENRE }
         val out = mutableListOf<Track>()
         ctx.contentResolver.query(
-            m.EXTERNAL_CONTENT_URI, cols.toTypedArray(), "${m.IS_MUSIC} != 0", null,
-            "${m.TITLE} COLLATE NOCASE"
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), "${MediaStore.Audio.Media.IS_MUSIC} != 0", null,
+            "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE"
         )?.use { c ->
             while (c.moveToNext()) {
                 val id = c.getLong(0)

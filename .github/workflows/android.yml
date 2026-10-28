@@ -17,8 +17,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
       # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
         with:

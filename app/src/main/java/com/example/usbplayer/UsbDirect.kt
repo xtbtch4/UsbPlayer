@@ -22,6 +22,7 @@ object UsbDirect {
     var status by mutableStateOf(""); private set
     @Volatile var active = false; private set
     @Volatile var name = ""; private set
+    @Volatile var generation = 0; private set
 
     private var conn: UsbDeviceConnection? = null
     private var acIf = 0
@@ -88,6 +89,7 @@ object UsbDirect {
         conn = c
         rates = queryRates(c)
         name = d.productName ?: "USB DAC"
+        generation++
         ready = true
         status = "Прямой USB: $name · ${rates.joinToString(" ") { fmt(it) }} кГц"
         return true
@@ -151,6 +153,7 @@ object UsbDirect {
 
     @Synchronized fun close() {
         stopStream()
+        generation++
         conn?.let { c ->
             zeroAlt?.let { c.releaseInterface(it) }
             c.close()

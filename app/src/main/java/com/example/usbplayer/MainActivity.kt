@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import androidx.compose.ui.text.font.FontFamily
 import android.content.ComponentName
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +54,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +74,7 @@ class MainActivity : ComponentActivity() {
     private val importEq = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             val text = contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() }.orEmpty()
-            val name = it.lastPathSegment?.substringAfterLast('/')?.removeSuffix(".txt") ?: "AutoEQ"
+            val name = it.lastPathSegment?.substringAfterLast(&#x27;/&#x27;)?.removeSuffix(".txt") ?: "AutoEQ"
             if (Eq.load(text, name)) AppState.reapply?.invoke() else AppState.message = "Не удалось разобрать профиль AutoEQ"
         }
     }
@@ -90,6 +95,29 @@ class MainActivity : ComponentActivity() {
                 primary = Color(0xFFD0BCFF), background = Color(0xFF0F0D13), surface = Color(0xFF0F0D13),
                 surfaceContainer = Color(0xFF1A1721), onSurfaceVariant = Color(0xFFB8B2C4))
             ) { Surface(color = MaterialTheme.colorScheme.background) { Screen() } }
+        }
+    }
+
+    private val homeSections = listOf(
+        "Новинки" to "new-releases", "Самые прослушиваемые" to "most-streamed", "Награды прессы" to "press-awards",
+        "Qobuzissime" to "qobuzissims", "Альбом недели" to "album-of-the-week",
+        "Идеальная дискография" to "ideal-discography", "Бестселлеры" to "best-sellers")
+
+    @Composable
+    fun AlbumRow(title: String, albums: List<QAlbum>, onOpen: (QAlbum) -> Unit) {
+        Column(Modifier.padding(vertical = 8.dp)) {
+            Text(title, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(albums) { a ->
+                    Column(Modifier.width(140.dp).clickable { onOpen(a) }) {
+                        Cover(a.asTrack(), 140.dp)
+                        Text(a.title, Modifier.padding(top = 6.dp), maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                        Text(a.artist, maxLines = 1, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (a.quality.isNotEmpty()) Text(a.quality, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
         }
     }
 
@@ -128,6 +156,8 @@ class MainActivity : ComponentActivity() {
         var curId by remember { mutableStateOf<String?>(null) }
         var expanded by remember { mutableStateOf(false) }
         var usbReport by remember { mutableStateOf<String?>(null) }
+        var directOn by remember { mutableStateOf(UsbDirect.ready) }
+        var directInfo by remember { mutableStateOf("") }
         var tab by remember { mutableIntStateOf(0) }
         var filter by remember { mutableStateOf("") }
         var openAlbum by remember { mutableStateOf<String?>(null) }
@@ -144,12 +174,40 @@ class MainActivity : ComponentActivity() {
         var qToken by remember { mutableStateOf("") }
         var remote by remember { mutableStateOf<List<Track>>(emptyList()) }
         var error by remember { mutableStateOf<String?>(null) }
+        var remoteAlbums by remember { mutableStateOf<List<QAlbum>>(emptyList()) }
+        var home by remember { mutableStateOf<List<Pair<String, List<QAlbum>>>>(emptyList()) }
+        var homeLoading by remember { mutableStateOf(false) }
+        var qAlbum by remember { mutableStateOf<QAlbum?>(null) }
+        var qTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+        val loadHome: () -> Unit = {
+            scope.launch {
+                homeLoading = true; error = null
+                val r = withContext(Dispatchers.IO) {
+                    coroutineScope {
+                        homeSections.map { (t, type) -> async { t to runCatching { Providers.qobuz.featured(type) } } }.awaitAll()
+                    }
+                }
+                home = r.mapNotNull { (t, res) -> res.getOrNull()?.takeIf { it.isNotEmpty() }?.let { t to it } }
+                if (home.isEmpty()) error = r.firstNotNullOfOrNull { it.second.exceptionOrNull()?.message } ?: "Главная пуста"
+                homeLoading = false
+            }
+        }
+        val openQ: (QAlbum) -> Unit = { a ->
+            qAlbum = a; qTracks = emptyList()
+            scope.launch {
+                runCatching { withContext(Dispatchers.IO) { Providers.qobuz.albumTracks(a.id) } }
+                    .onSuccess { qTracks = it }.onFailure { error = it.message }
+            }
+        }
+        LaunchedEffect(loggedIn) { if (loggedIn && home.isEmpty()) loadHome() }
+        BackHandler(enabled = qAlbum != null) { qAlbum = null }
 
         LaunchedEffect(c) {
             while (true) {
                 c?.let { playing = it.isPlaying; pos = it.currentPosition
                     dur = it.duration.coerceAtLeast(1L); title = it.mediaMetadata.title?.toString() ?: ""
                     curId = it.currentMediaItem?.mediaId }
+                directInfo = UsbDirect.info()
                 delay(500)
             }
         }
@@ -225,6 +283,13 @@ class MainActivity : ComponentActivity() {
                     Text(if (Eq.active) "Bit-perfect (выкл. из-за EQ)" else "Bit-perfect", Modifier.weight(1f))
                     Switch(AppState.bitPerfectWanted, { AppState.bitPerfectWanted = it; AppState.reapply?.invoke() })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Прямой USB (свой драйвер, эксперимент)", Modifier.weight(1f))
+                    Switch(directOn, { directOn = it; setDirect(it) })
+                }
+                if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
+                    Text(UsbDirect.status + if (directInfo.isNotEmpty()) "\n$directInfo" else "",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box(Modifier.weight(1f)) {
                 when (tab) {
@@ -243,7 +308,7 @@ class MainActivity : ComponentActivity() {
                     1 -> if (openAlbum == null) {
                         LazyColumn {
                             items(albums) { (key, ts) ->
-                                val (alb, art) = key.split('\u0000')
+                                val (alb, art) = key.split(&#x27;\u0000&#x27;)
                                 ListItem(
                                     leadingContent = { Cover(ts.first(), 56.dp) },
                                     headlineContent = { Text(alb, maxLines = 1) },
@@ -278,7 +343,7 @@ class MainActivity : ComponentActivity() {
                         LazyColumn { itemsIndexed(list) { i, t -> TrackRow(t, "✕", { playlists.remove(name, t.id); plVersion++ }) { play(list, i) } } }
                     }
                     3 -> Column {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (!loggedIn) {
                                 OutlinedTextField(qAppId, { qAppId = it }, label = { Text("app_id") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                                 OutlinedTextField(qSecret, { qSecret = it }, label = { Text("app_secret") }, singleLine = true,
@@ -295,19 +360,47 @@ class MainActivity : ComponentActivity() {
                                 } }) { Text("Войти по токену") }
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedTextField(query, { query = it }, label = { Text("Поиск треков") }, singleLine = true, modifier = Modifier.weight(1f))
+                                    OutlinedTextField(query, { query = it }, label = { Text("Поиск альбомов и треков") }, singleLine = true, modifier = Modifier.weight(1f))
                                     Spacer(Modifier.width(8.dp))
                                     Button({ scope.launch {
-                                        error = null
-                                        runCatching { withContext(Dispatchers.IO) { Providers.qobuz.search(query) } }
-                                            .onSuccess { remote = it }.onFailure { error = it.message }
+                                        error = null; qAlbum = null
+                                        runCatching { withContext(Dispatchers.IO) { Providers.qobuz.searchAll(query) } }
+                                            .onSuccess { remoteAlbums = it.first; remote = it.second }.onFailure { error = it.message }
                                     } }) { Text("Найти") }
                                 }
-                                TextButton({ Providers.qobuz.logout(this@MainActivity); loggedIn = false; remote = emptyList() }) { Text("Выйти из Qobuz") }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton({ query = ""; remote = emptyList(); remoteAlbums = emptyList(); qAlbum = null }) { Text("Главная") }
+                                    TextButton({
+                                        Providers.qobuz.logout(this@MainActivity)
+                                        loggedIn = false; remote = emptyList(); remoteAlbums = emptyList(); home = emptyList(); qAlbum = null
+                                    }) { Text("Выйти из Qobuz") }
+                                }
                             }
                             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         }
-                        LazyColumn { itemsIndexed(remote) { i, t -> TrackRow(t, null, {}) { play(remote, i) } } }
+                        if (loggedIn) {
+                            val al = qAlbum
+                            when {
+                                al != null -> Column {
+                                    TextButton({ qAlbum = null }) { Text("← ${al.title}", maxLines = 1) }
+                                    if (qTracks.isEmpty()) Text("Загрузка…", Modifier.padding(16.dp))
+                                    LazyColumn { itemsIndexed(qTracks) { i, t -> TrackRow(t, null, {}) { play(qTracks, i) } } }
+                                }
+                                remote.isNotEmpty() || remoteAlbums.isNotEmpty() -> LazyColumn {
+                                    if (remoteAlbums.isNotEmpty()) item { AlbumRow("Альбомы", remoteAlbums, openQ) }
+                                    itemsIndexed(remote) { i, t -> TrackRow(t, null, {}) { play(remote, i) } }
+                                }
+                                else -> LazyColumn {
+                                    items(home) { (title, albums) -> AlbumRow(title, albums, openQ) }
+                                    if (home.isEmpty()) item {
+                                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(if (homeLoading) "Загрузка главной…" else "Главная не загрузилась", Modifier.weight(1f))
+                                            if (!homeLoading) Button({ loadHome() }) { Text("Повторить") }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     else -> Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -367,6 +460,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun usbAudioDevice(): UsbDevice? = getSystemService(UsbManager::class.java).deviceList.values.firstOrNull { d ->
+        (0 until d.interfaceCount).any { d.getInterface(it).interfaceClass == UsbConstants.USB_CLASS_AUDIO }
+    }
+
+    /** Включает/выключает прямой драйвер (после выключения ЦАП может вернуться в систему только после переподключения). */
+    private fun setDirect(on: Boolean) {
+        if (!on) { Thread { UsbDirect.close(); runOnUiThread { AppState.reapply?.invoke() } }.start(); return }
+        val dev = usbAudioDevice() ?: return run { UsbDirect.close(); AppState.message = "USB-аудиоустройство не найдено" }
+        val um = getSystemService(UsbManager::class.java)
+        fun go() = Thread { UsbDirect.open(this, dev); runOnUiThread { AppState.reapply?.invoke() } }.start()
+        if (um.hasPermission(dev)) return go()
+        val action = "$packageName.USB_PERMISSION_DIRECT"
+        val rcv = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                unregisterReceiver(this)
+                if (um.hasPermission(dev)) go() else AppState.message = "Нет разрешения на доступ к USB"
+            }
+        }
+        ContextCompat.registerReceiver(this, rcv, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
+        um.requestPermission(dev, PendingIntent.getBroadcast(this, 0, Intent(action).setPackage(packageName), PendingIntent.FLAG_MUTABLE))
+    }
+
     private fun copyText(t: String) =
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("usb", t))
 
@@ -411,5 +526,5 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Одиночный файл из проводника (в т.ч. DSF/DFF, которые MediaStore может не индексировать). */
-    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast('/') ?: "Файл", "", "", 0, uri)), 0)
+    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast(&#x27;/&#x27;) ?: "Файл", "", "", 0, uri)), 0)
 }

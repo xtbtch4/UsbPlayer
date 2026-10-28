@@ -2,12 +2,18 @@ package com.example.usbplayer
 
 import android.content.Context
 import android.net.Uri
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
+
+data class QAlbum(val id: String, val title: String, val artist: String, val art: String, val year: String, val quality: String) {
+    /** Заглушка-трек, чтобы переиспользовать загрузку обложек. */
+    fun asTrack() = Track(0, title, artist, title, 0, Uri.EMPTY, "qobuz", art = art)
+}
 
 /**
  * Qobuz REST API v0.2. Нужны ваши app_id / app_secret и user_auth_token того же приложения
@@ -69,20 +75,55 @@ class QobuzProvider {
         save(ctx)
     }
 
-    fun search(query: String): List<Track> {
-        val items = get("track/search", mapOf("query" to query, "limit" to "50"))
-            .optJSONObject("tracks")?.optJSONArray("items") ?: return emptyList()
-        return (0 until items.length()).map { items.getJSONObject(it) }.map { t ->
-            val id = t.getLong("id")
-            Track(
-                id, t.optString("title"),
-                t.optJSONObject("performer")?.optString("name") ?: "",
-                t.optJSONObject("album")?.optString("title") ?: "",
-                t.optLong("duration") * 1000,
-                Uri.parse("qobuz://track/$id"), "qobuz",
-                art = t.optJSONObject("album")?.optJSONObject("image")?.optString("small") ?: ""
-            )
-        }
+    private fun list(a: JSONArray?): List<JSONObject> = if (a == null) emptyList() else (0 until a.length()).map { a.getJSONObject(it) }
+
+    private fun album(a: JSONObject): QAlbum {
+        val img = a.optJSONObject("image")
+        val bits = a.optInt("maximum_bit_depth")
+        val khz = a.optDouble("maximum_sampling_rate", 0.0)
+        val quality = if (bits > 0 && khz > 0) "$bits/" + (if (khz % 1.0 == 0.0) khz.toInt().toString() else khz.toString()) else ""
+        return QAlbum(
+            a.optString("id"), a.optString("title"), a.optJSONObject("artist")?.optString("name") ?: "",
+            img?.optString("large")?.ifEmpty { null } ?: img?.optString("small") ?: "",
+            a.optString("release_date_original").take(4), quality
+        )
+    }
+
+    private fun track(t: JSONObject, albumTitle: String? = null, art: String? = null, artist: String? = null, year: Int = 0): Track {
+        val id = t.getLong("id")
+        val alb = t.optJSONObject("album")
+        return Track(
+            id, t.optString("title"),
+            t.optJSONObject("performer")?.optString("name") ?: artist ?: "",
+            albumTitle ?: alb?.optString("title") ?: "",
+            t.optLong("duration") * 1000,
+            Uri.parse("qobuz://track/$id"), "qobuz",
+            year = year,
+            trackNo = t.optInt("media_number", 1) * 1000 + t.optInt("track_number"),
+            art = art ?: alb?.optJSONObject("image")?.optString("small") ?: ""
+        )
+    }
+
+    /** Подборки главной: new-releases, most-streamed, press-awards, best-sellers, ideal-discography, qobuzissims, album-of-the-week. */
+    fun featured(type: String, limit: Int = 24): List<QAlbum> =
+        list(get("album/getFeatured", mapOf("type" to type, "limit" to limit.toString()))
+            .optJSONObject("albums")?.optJSONArray("items")).map(::album)
+
+    fun albumTracks(id: String): List<Track> {
+        val j = get("album/get", mapOf("album_id" to id))
+        val a = album(j)
+        return list(j.optJSONObject("tracks")?.optJSONArray("items"))
+            .map { track(it, a.title, a.art, a.artist, a.year.toIntOrNull() ?: 0) }
+    }
+
+    fun search(query: String): List<Track> =
+        list(get("track/search", mapOf("query" to query, "limit" to "50")).optJSONObject("tracks")?.optJSONArray("items")).map { track(it) }
+
+    /** Общий поиск по каталогу: (альбомы, треки). */
+    fun searchAll(query: String): Pair<List<QAlbum>, List<Track>> {
+        val j = get("catalog/search", mapOf("query" to query, "limit" to "30"))
+        return list(j.optJSONObject("albums")?.optJSONArray("items")).map(::album) to
+            list(j.optJSONObject("tracks")?.optJSONArray("items")).map { track(it) }
     }
 
     /** Прямая ссылка живёт недолго, поэтому получаем её в момент загрузки трека. */

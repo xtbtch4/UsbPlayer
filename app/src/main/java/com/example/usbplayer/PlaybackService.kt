@@ -28,6 +28,7 @@ class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var player: ExoPlayer
     private var lastRate: Int? = null
+    private val tee = DirectTee()
 
     override fun onCreate() {
         super.onCreate()
@@ -38,7 +39,7 @@ class PlaybackService : MediaSessionService() {
             ): AudioSink = DefaultAudioSink.Builder(context)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(arrayOf<AudioProcessor>(Eq.processor))
+                .setAudioProcessors(arrayOf<AudioProcessor>(Eq.processor, tee))
                 .build()
         }.setEnableAudioFloatOutput(true)
 
@@ -59,6 +60,7 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { UsbDirect.setPlaying(isPlaying) }
             override fun onTracksChanged(tracks: Tracks) {
                 val f = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
                     ?.getTrackFormat(0) ?: return
@@ -66,7 +68,7 @@ class PlaybackService : MediaSessionService() {
                 lastRate = f.sampleRate.takeIf { it > 0 }
                 Eq.dsd = dsd
                 AppState.formatInfo = if (dsd) "${f.label} · DoP ${f.sampleRate / 1000.0} kHz"
-                else "${f.sampleMimeType?.substringAfter('/')?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
+                else "${f.sampleMimeType?.substringAfter(&#x27;/&#x27;)?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
                     (f.bitrate.takeIf { it > 0 }?.let { " · ${it / 1000} kbps" } ?: "")
                 applyRouting()
             }
@@ -90,6 +92,15 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyRouting() {
         Eq.apply()
+        if (UsbDirect.ready) {   // прямой драйвер владеет ЦАПом, системный маршрут не нужен
+            AppState.dacName = UsbDirect.name
+            AppState.bitPerfectActive = !Eq.active
+            AppState.bpInfo = UsbDirect.status
+            AppState.mixerMatched = false
+            player.setPreferredAudioDevice(null)
+            if (AppState.message?.startsWith("DSD") == true) AppState.message = null
+            return
+        }
         val dev = UsbDac.find(this)
         AppState.dacName = dev?.productName?.toString()
         player.setPreferredAudioDevice(dev)

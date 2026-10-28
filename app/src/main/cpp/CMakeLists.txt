@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(usbaudio)
+add_library(usbaudio SHARED usb_audio.cpp)
+find_library(log-lib log)
+target_compile_options(usbaudio PRIVATE -O2 -Wall)
+target_link_libraries(usbaudio ${log-lib})

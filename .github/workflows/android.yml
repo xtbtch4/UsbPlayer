@@ -17,6 +17,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Use the Android SDK preinstalled on the GitHub-hosted runner.
+- name: Install NDK and CMake
+        run: yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
       # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -32,10 +36,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo '## Ошибки сборки'
-            echo '```'
-            grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
-            echo '```'
+            echo &#x27;## Ошибки сборки&#x27;
+            echo &#x27;```&#x27;
+            grep -E &#x27;^e: |error:|What went wrong|Execution failed&#x27; -A3 build.log | head -80 || true
+            echo &#x27;```&#x27;
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4

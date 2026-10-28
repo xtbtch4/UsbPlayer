@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         playlists = Playlists(this)
+        Providers.qobuz.load(this)
         val audioPerm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
         perms.launch(arrayOf(audioPerm, Manifest.permission.POST_NOTIFICATIONS))
@@ -138,6 +139,9 @@ class MainActivity : ComponentActivity() {
         var email by remember { mutableStateOf("") }
         var pass by remember { mutableStateOf("") }
         var query by remember { mutableStateOf("") }
+        var qAppId by remember { mutableStateOf(Providers.qobuz.appId) }
+        var qSecret by remember { mutableStateOf(Providers.qobuz.appSecret) }
+        var qToken by remember { mutableStateOf("") }
         var remote by remember { mutableStateOf<List<Track>>(emptyList()) }
         var error by remember { mutableStateOf<String?>(null) }
 
@@ -275,20 +279,22 @@ class MainActivity : ComponentActivity() {
                     }
                     3 -> Column {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            when {
-                                !Providers.qobuz.configured -> Text("Впишите app_id и app_secret от Qobuz в Credentials.kt")
-                                !loggedIn -> {
-                                    OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                                    OutlinedTextField(pass, { pass = it }, label = { Text("Пароль") }, singleLine = true,
-                                        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                                    Button({ scope.launch {
-                                        error = null
-                                        runCatching { withContext(Dispatchers.IO) { Providers.qobuz.login(email, pass) } }
-                                            .onSuccess { loggedIn = it; if (!it) error = "Не удалось войти" }
-                                            .onFailure { error = it.message }
-                                    } }) { Text("Войти") }
-                                }
-                                else -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!loggedIn) {
+                                OutlinedTextField(qAppId, { qAppId = it }, label = { Text("app_id") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(qSecret, { qSecret = it }, label = { Text("app_secret") }, singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(qToken, { qToken = it }, label = { Text("user_auth_token") }, singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+                                Button({ scope.launch {
+                                    error = null
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            Providers.qobuz.signInWithToken(this@MainActivity, qAppId.trim(), qSecret.trim(), qToken.trim())
+                                        }
+                                    }.onSuccess { loggedIn = true; qToken = "" }.onFailure { error = it.message }
+                                } }) { Text("Войти по токену") }
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     OutlinedTextField(query, { query = it }, label = { Text("Поиск треков") }, singleLine = true, modifier = Modifier.weight(1f))
                                     Spacer(Modifier.width(8.dp))
                                     Button({ scope.launch {
@@ -297,6 +303,7 @@ class MainActivity : ComponentActivity() {
                                             .onSuccess { remote = it }.onFailure { error = it.message }
                                     } }) { Text("Найти") }
                                 }
+                                TextButton({ Providers.qobuz.logout(this@MainActivity); loggedIn = false; remote = emptyList() }) { Text("Выйти из Qobuz") }
                             }
                             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         }

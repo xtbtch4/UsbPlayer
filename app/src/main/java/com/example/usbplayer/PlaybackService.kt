@@ -64,7 +64,7 @@ class PlaybackService : MediaSessionService() {
                 lastRate = f.sampleRate.takeIf { it > 0 }
                 Eq.dsd = dsd
                 AppState.formatInfo = if (dsd) "${f.label} · DoP ${f.sampleRate / 1000.0} kHz"
-                else "${f.sampleMimeType?.substringAfter(&#x27;/&#x27;)?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
+                else "${f.sampleMimeType?.substringAfter('/')?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
                     (f.bitrate.takeIf { it > 0 }?.let { " · ${it / 1000} kbps" } ?: "")
                 applyRouting()
             }

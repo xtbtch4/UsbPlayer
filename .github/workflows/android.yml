@@ -1,46 +1,30 @@
-name: Android APK
+name: Android CI
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Extract latest uploaded Android project ZIP
-        run: |
-          unzip -q "UsbPlayer (1).zip" -d /tmp/usbplayer-source
-          cp -a /tmp/usbplayer-source/UsbPlayer/. .
-          test -f app/build.gradle.kts -o -f app/build.gradle
-          mkdir -p app/src/main/java/com/example/usbplayer
-          cp patches/Library.kt app/src/main/java/com/example/usbplayer/Library.kt
-          test -f settings.gradle.kts -o -f settings.gradle
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: android-actions/setup-android@v3
+
+      # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: "8.9"
 
       - name: Build debug APK
-        run: gradle assembleDebug
+        run: gradle assembleDebug --stacktrace
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: UsbPlayer-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error

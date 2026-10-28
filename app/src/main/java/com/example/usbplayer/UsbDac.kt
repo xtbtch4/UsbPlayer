@@ -3,6 +3,7 @@ package com.example.usbplayer
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
+import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioMixerAttributes
 import android.os.Build
@@ -34,10 +35,10 @@ object UsbDac {
     class BpResult(val ok: Boolean, val info: String, val matched: Boolean = false)
 
     private fun enc(e: Int) = when (e) {
-        android.media.AudioFormat.ENCODING_PCM_16BIT -> "PCM16"
-        android.media.AudioFormat.ENCODING_PCM_FLOAT -> "Float"
-        android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED -> "PCM24"
-        android.media.AudioFormat.ENCODING_PCM_32BIT -> "PCM32"
+        AudioFormat.ENCODING_PCM_16BIT -> "PCM16"
+        AudioFormat.ENCODING_PCM_FLOAT -> "Float"
+        AudioFormat.ENCODING_PCM_24BIT_PACKED -> "PCM24"
+        AudioFormat.ENCODING_PCM_32BIT -> "PCM32"
         else -> "enc$e"
     }
 
@@ -57,7 +58,7 @@ object UsbDac {
                 "частоты ${all.map { it.format.sampleRate }.distinct().sorted()}"
             val bp = all.filter { it.mixerBehavior == AudioMixerAttributes.MIXER_BEHAVIOR_BIT_PERFECT }
             if (bp.isNotEmpty()) {
-                val order = listOf(android.media.AudioFormat.ENCODING_PCM_16BIT, android.media.AudioFormat.ENCODING_PCM_FLOAT, android.media.AudioFormat.ENCODING_PCM_32BIT, android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED)
+                val order = listOf(AudioFormat.ENCODING_PCM_16BIT, AudioFormat.ENCODING_PCM_FLOAT, AudioFormat.ENCODING_PCM_32BIT, AudioFormat.ENCODING_PCM_24BIT_PACKED)
                 val pick = bp.filter { it.format.sampleRate == wantRate }.minByOrNull { rank(order, it) }
                     ?: if (exact) null else bp.maxByOrNull { it.format.sampleRate }
                 if (pick == null) return BpResult(false, "нет режима $wantRate Гц; есть: " +
@@ -68,8 +69,8 @@ object UsbDac {
             }
             if (exact) return BpResult(false, "прошивка не даёт bit-perfect ($stats)")
             // Запасной путь: bit-perfect в прошивке нет, но можно задать микшеру частоту трека (без SRC)
-            val stereo = all.filter { it.format.channelMask == android.media.AudioFormat.CHANNEL_OUT_STEREO }.ifEmpty { all }
-            val order = listOf(android.media.AudioFormat.ENCODING_PCM_24BIT_PACKED, android.media.AudioFormat.ENCODING_PCM_32BIT, android.media.AudioFormat.ENCODING_PCM_FLOAT, android.media.AudioFormat.ENCODING_PCM_16BIT)
+            val stereo = all.filter { it.format.channelMask == AudioFormat.CHANNEL_OUT_STEREO }.ifEmpty { all }
+            val order = listOf(AudioFormat.ENCODING_PCM_24BIT_PACKED, AudioFormat.ENCODING_PCM_32BIT, AudioFormat.ENCODING_PCM_FLOAT, AudioFormat.ENCODING_PCM_16BIT)
             val pick = stereo.filter { it.format.sampleRate == wantRate }.minByOrNull { rank(order, it) }
                 ?: return BpResult(false, "прошивка не даёт bit-perfect ($stats)")
             val ok = am.setPreferredMixerAttributes(attrs, dev, pick)

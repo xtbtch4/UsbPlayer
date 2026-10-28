@@ -17,11 +17,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # Use the Android SDK preinstalled on the GitHub-hosted runner.
-- name: Install NDK and CMake
-        run: yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+      - name: Install NDK and CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
 
-      # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
@@ -30,16 +29,15 @@ jobs:
         shell: bash
         run: gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
 
-      # Если сборка упала, показываем только строки с ошибками прямо на странице запуска (Summary)
       - name: Ошибки сборки
         if: failure()
         shell: bash
         run: |
           {
-            echo &#x27;## Ошибки сборки&#x27;
-            echo &#x27;```&#x27;
-            grep -E &#x27;^e: |error:|What went wrong|Execution failed&#x27; -A3 build.log | head -80 || true
-            echo &#x27;```&#x27;
+            echo '## Ошибки сборки'
+            echo '\`\`\`'
+            grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
+            echo '\`\`\`'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4

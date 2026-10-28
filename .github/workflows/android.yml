@@ -1,9 +1,6 @@
 name: Android CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -17,7 +14,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # GitHub-hosted Ubuntu runners already include the Android SDK; avoid setup-android's obsolete `sdkmanager tools` install.
+      - uses: android-actions/setup-android@v3
 
       # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
@@ -25,7 +22,20 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        run: gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+
+      # Если сборка упала, показываем только строки с ошибками прямо на странице запуска (Summary)
+      - name: Ошибки сборки
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '## Ошибки сборки'
+            echo '```'
+            grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:

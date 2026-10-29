@@ -16,6 +16,7 @@ import android.content.ComponentName
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -287,6 +288,11 @@ class MainActivity : ComponentActivity() {
                     Text("Прямой USB (свой драйвер, эксперимент)", Modifier.weight(1f))
                     Switch(directOn, { directOn = it; setDirect(it) })
                 }
+                if (UsbDirect.hasVolume) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Громкость ЦАП", style = MaterialTheme.typography.bodySmall)
+                    Slider(UsbDirect.volume, { UsbDirect.setVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
+                    Text("${(UsbDirect.volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                }
                 if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
                     Text(UsbDirect.status + if (directInfo.isNotEmpty()) "\n$directInfo" else "",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -480,6 +486,16 @@ class MainActivity : ComponentActivity() {
         }
         ContextCompat.registerReceiver(this, rcv, IntentFilter(action), ContextCompat.RECEIVER_NOT_EXPORTED)
         um.requestPermission(dev, PendingIntent.getBroadcast(this, 0, Intent(action).setPackage(packageName), PendingIntent.FLAG_MUTABLE))
+    }
+
+    /** Кнопки громкости внутри приложения управляют громкостью самого ЦАП, когда включён прямой режим. */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
+        if (UsbDirect.ready && UsbDirect.hasVolume && (up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.setVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun copyText(t: String) =

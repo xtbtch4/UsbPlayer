@@ -6,8 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore.Audio.Media as AudioMedia
 
-data class Track(
-    val id: Long, val title: String, val artist: String, val album: String,
+data class Track(    val id: Long, val title: String, val artist: String, val album: String,
     val durationMs: Long, val uri: Uri, val provider: String = "local",
     val genre: String = "", val year: Int = 0, val trackNo: Int = 0, val albumArtist: String = "",
     val albumId: Long = 0, val art: String = ""

@@ -1,6 +1,7 @@
 package com.example.usbplayer
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
@@ -10,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.nio.ByteBuffer
+import java.util.concurrent.Executors
 
 /**
  * Прямой драйвер USB Audio Class 2 (async + feedback). Делает: захват интерфейсов, выбор частоты через
@@ -17,13 +19,24 @@ import java.nio.ByteBuffer
  */
 object UsbDirect {
     init { System.loadLibrary("usbaudio") }
-
     var ready by mutableStateOf(false); private set
     var status by mutableStateOf(""); private set
     @Volatile var active = false; private set
     @Volatile var name = ""; private set
     /** Растёт при каждом открытии/закрытии устройства: по нему конвейер понимает, что пора (пере)запустить поток. */
     @Volatile var generation = 0; private set
+
+    /** Аппаратная громкость ЦАП (Feature Unit). Системная громкость в прямом режиме не действует. */
+    var hasVolume by mutableStateOf(false); private set
+    var volume by mutableStateOf(0.3f); private set
+    private var fuId = 0
+    private var volChannels: List<Int> = emptyList()
+    private var volMin = -90 * 256
+    private var volMax = 0
+    private var volRes = 256
+    private var prefs: SharedPreferences? = null
+    private val ctlLock = Any()
+    private val vexec = Executors.newSingleThreadExecutor()
 
     private var conn: UsbDeviceConnection? = null
     private var acIf = 0
@@ -90,11 +103,86 @@ object UsbDirect {
         if (!c.claimInterface(ac, true) || !c.claimInterface(zi, true)) { c.close(); return fail("не удалось захватить интерфейсы") }
         conn = c
         rates = queryRates(c)
+        initVolume(c, raw, ctx)
         name = d.productName ?: "USB DAC"
         generation++
         ready = true
         status = "Прямой USB: $name · ${rates.joinToString(" ") { fmt(it) }} кГц"
         return true
+    }
+
+    private fun u16(b: ByteArray, o: Int) = (b[o].toInt() and 255) or ((b[o + 1].toInt() and 255) shl 8)
+    private fun s16(b: ByteArray, o: Int) = u16(b, o).toShort().toInt()
+
+    /** Ищет Feature Unit с регулятором громкости (единицы 1/256 дБ), снимает mute и выставляет сохранённый уровень. */
+    private fun initVolume(c: UsbDeviceConnection, raw: ByteArray, ctx: Context) {
+        prefs = ctx.getSharedPreferences("usb", Context.MODE_PRIVATE)
+        volume = prefs?.getFloat("volume", 0.3f) ?: 0.3f   // по умолчанию тихо: прямой режим не слушает системную громкость
+        hasVolume = false
+        var i = 0; var cls = 0; var sub = 0
+        var unit = 0; var master = 0L; val chans = mutableListOf<Long>()
+        while (i + 2 <= raw.size) {
+            val len = raw[i].toInt() and 255
+            if (len < 2 || i + len > raw.size) break
+            val t = raw[i + 1].toInt() and 255
+            if (t == 4 && len >= 9) { cls = raw[i + 5].toInt() and 255; sub = raw[i + 6].toInt() and 255 }
+            if (t == 0x24 && cls == 1 && sub == 1 && len >= 10 && (raw[i + 2].toInt() and 255) == 0x06 && unit == 0) {
+                unit = raw[i + 3].toInt() and 255
+                for (k in 0 until (len - 6) / 4) {
+                    var v = 0L
+                    for (b in 0..3) v = v or ((raw[i + 5 + 4 * k + b].toLong() and 255) shl (8 * b))
+                    if (k == 0) master = v else chans += v
+                }
+            }
+            i += len
+        }
+        if (unit == 0) return
+        fuId = unit
+        val masterVol = ((master shr 2) and 3L) != 0L
+        volChannels = if (masterVol) listOf(0)
+        else chans.indices.filter { ((chans[it] shr 2) and 3L) != 0L }.map { it + 1 }
+        if (volChannels.isEmpty()) return
+        val idx = (fuId shl 8) or acIf
+        synchronized(ctlLock) {
+            if ((master and 3L) != 0L)   // снять mute
+                c.controlTransfer(0x21, 0x01, (0x01 shl 8) or 0, idx, byteArrayOf(0), 1, 300)
+            val hdr = ByteArray(2)
+            if (c.controlTransfer(0xA1, 0x02, (0x02 shl 8) or volChannels[0], idx, hdr, 2, 300) == 2) {
+                val n = u16(hdr, 0)
+                if (n >= 1) {
+                    val buf = ByteArray(2 + 6 * n)
+                    if (c.controlTransfer(0xA1, 0x02, (0x02 shl 8) or volChannels[0], idx, buf, buf.size, 300) == buf.size) {
+                        volMin = (0 until n).minOf { s16(buf, 2 + 6 * it) }
+                        volMax = (0 until n).maxOf { s16(buf, 4 + 6 * it) }
+                        volRes = u16(buf, 6).coerceAtLeast(1)
+                    }
+                }
+            }
+        }
+        hasVolume = true
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        val c = conn ?: return
+        if (!hasVolume) return
+        val spanDb = (volMax - volMin) / 256.0
+        val useDb = minOf(60.0, spanDb)
+        var tgt = if (volume <= 0.001f) volMin else (volMax - (1 - volume) * useDb * 256).toInt()
+        tgt = tgt.coerceIn(volMin, volMax)
+        if (volRes > 1) tgt = volMin + ((tgt - volMin) / volRes) * volRes
+        val data = byteArrayOf(tgt.toByte(), (tgt shr 8).toByte())
+        synchronized(ctlLock) {
+            for (ch in volChannels)
+                c.controlTransfer(0x21, 0x01, (0x02 shl 8) or ch, (fuId shl 8) or acIf, data, 2, 200)
+        }
+    }
+
+    /** Громкость 0..1 (шкала линейна по дБ в пределах 60 дБ от максимума). */
+    fun setVolume(f: Float) {
+        volume = f.coerceIn(0f, 1f)
+        prefs?.edit()?.putFloat("volume", volume)?.apply()
+        vexec.execute { applyVolume() }
     }
 
     private fun queryRates(c: UsbDeviceConnection): List<Int> {
@@ -127,7 +215,8 @@ object UsbDirect {
         stopStream()
         c.setInterface(za)
         val d = ByteArray(4) { ((rate shr (8 * it)) and 255).toByte() }
-        if (c.controlTransfer(0x21, 0x01, 0x0100, (clockId shl 8) or acIf, d, 4, 500) != 4) {
+        val rateOk = synchronized(ctlLock) { c.controlTransfer(0x21, 0x01, 0x0100, (clockId shl 8) or acIf, d, 4, 500) == 4 }
+        if (!rateOk) {
             status = "не удалось задать частоту $rate Гц"; return false
         }
         try { Thread.sleep(80) } catch (e: InterruptedException) {}
@@ -167,7 +256,7 @@ object UsbDirect {
             zeroAlt?.let { c.releaseInterface(it) }
             c.close()
         }
-        conn = null; generation++; ready = false; status = ""
+        conn = null; generation++; ready = false; hasVolume = false; status = ""
     }
 
     private fun fail(msg: String): Boolean { status = "Прямой USB: $msg"; return false }

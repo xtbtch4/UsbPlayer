@@ -4,6 +4,8 @@
 #include <android/log.h>
 #include <linux/usbdevice_fs.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include <poll.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -22,7 +24,7 @@
 namespace {
 
 constexpr int kDataUrbs = 12;          // URB с данными
-constexpr int kDataPkts = 16;          // пакетов на URB (1 пакет = 1 микрокадр = 125 мкс) -> 2 мс
+constexpr int kDataPkts = 32;          // пакетов на URB (1 пакет = 1 микрокадр = 125 мкс) -> 4 мс
 constexpr int kFbUrbs = 4;             // URB обратной связи
 constexpr int kFbPkts = 4;
 constexpr size_t kRing = 1u << 22;     // 4 МиБ кольцевой буфер
@@ -121,6 +123,7 @@ void handleFb(Urb& r) {
 }
 
 void* reaper(void*) {
+    setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), -19);   // аудио-приоритет (если разрешено)
     pollfd pfd{};
     pfd.fd = S.fd;
     pfd.events = POLLOUT;
@@ -256,6 +259,11 @@ Java_com_example_usbplayer_UsbDirect_nativeFlush(JNIEnv*, jobject) {
     if (!S.running.load()) return;
     S.flushReq = true;
     for (int i = 0; i < 100 && S.flushReq.load() && S.running.load(); i++) usleep(500);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_example_usbplayer_UsbDirect_nativeBuffered(JNIEnv*, jobject) {
+    return (jint)(S.head.load() - S.tail.load());
 }
 
 JNIEXPORT jstring JNICALL

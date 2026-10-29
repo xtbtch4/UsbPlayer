@@ -68,8 +68,8 @@ class QobuzProvider {
                 m.startsWith("Qobuz 401") || m.startsWith("Qobuz 403") -> {
                     token = null; throw IOException("Токен или app_id не приняты: $m")
                 }
-                m.startsWith("Qobuz ") -> {}
-                else -> { token = null; throw e }
+                m.startsWith("Qobuz ") -> {}   // другой ответ сервера: токен проверится при первом воспроизведении
+                else -> { token = null; throw e }   // сеть
             }
         }
         save(ctx)
@@ -104,6 +104,7 @@ class QobuzProvider {
         )
     }
 
+    /** Подборки главной: new-releases, most-streamed, press-awards, best-sellers, ideal-discography, qobuzissims, album-of-the-week. */
     fun featured(type: String, limit: Int = 24): List<QAlbum> =
         list(get("album/getFeatured", mapOf("type" to type, "limit" to limit.toString()))
             .optJSONObject("albums")?.optJSONArray("items")).map(::album)
@@ -118,6 +119,7 @@ class QobuzProvider {
     fun search(query: String): List<Track> =
         list(get("track/search", mapOf("query" to query, "limit" to "50")).optJSONObject("tracks")?.optJSONArray("items")).map { track(it) }
 
+    /** Общий поиск по каталогу: (альбомы, треки). */
     fun searchAll(query: String): Pair<List<QAlbum>, List<Track>> {
         val j = get("catalog/search", mapOf("query" to query, "limit" to "30"))
         return list(j.optJSONObject("albums")?.optJSONArray("items")).map(::album) to
@@ -134,6 +136,7 @@ class QobuzProvider {
         )).getString("url")
     }
 
+    /** Прямая ссылка живёт недолго, поэтому получаем её в момент загрузки трека. При отказе пробуем форматы пониже. */
     fun streamUrl(trackId: String): String {
         var first: IOException? = null
         for (f in listOf(formatId, 27, 7, 6, 5).distinct()) {
@@ -144,6 +147,8 @@ class QobuzProvider {
             } catch (e: IOException) {
                 if (first == null) first = e
                 val m = e.message.orEmpty()
+                if (m.contains("Invalid Request Signature"))
+                    throw IOException("Qobuz отклонил подпись запроса: app_secret не подходит к этому app_id")
                 if (!(m.startsWith("Qobuz 400") || m.startsWith("Qobuz 401") || m.startsWith("Qobuz 403") || m.startsWith("Qobuz 404"))) throw e
             }
         }

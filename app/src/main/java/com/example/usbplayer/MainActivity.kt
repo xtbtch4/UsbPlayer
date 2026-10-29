@@ -212,7 +212,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val plNames = remember(plVersion) { playlists.names() }
-        val cur = (tracks + remote).find { "${it.provider}:${it.id}" == curId }
+        val cur = (tracks + remote + qTracks).find { "${it.provider}:${it.id}" == curId }
         val accent by produceState(Color(0xFF3B2F5C), cur?.uri) {
             value = cur?.let { t -> withContext(Dispatchers.IO) { Art.load(this@MainActivity, t, 96)?.let(::dominant) } }
                 ?: Color(0xFF3B2F5C)

@@ -67,7 +67,9 @@ class PlaybackService : MediaSessionService() {
             override fun onPlayerError(error: PlaybackException) {
                 var t: Throwable = error
                 while (t.cause != null && t.cause !== t) t = t.cause!!
-                AppState.message = "Ошибка воспроизведения: ${t.message ?: error.errorCodeName}"
+                val at = t.stackTrace.firstOrNull { it.className.startsWith("com.example") || it.className.contains("media3") }
+                AppState.message = "Ошибка воспроизведения: ${t.javaClass.simpleName}: ${t.message ?: error.errorCodeName}" +
+                    (at?.let { " @ ${it.fileName}:${it.lineNumber}" } ?: "")
             }
             override fun onTracksChanged(tracks: Tracks) {
                 val f = tracks.groups.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
@@ -100,7 +102,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun applyRouting() {
         Eq.apply()
-        if (UsbDirect.ready) {
+        if (UsbDirect.ready) {   // прямой драйвер владеет ЦАПом, системный маршрут не нужен
             AppState.dacName = UsbDirect.name
             AppState.bitPerfectActive = !Eq.active
             AppState.bpInfo = UsbDirect.status
@@ -112,6 +114,7 @@ class PlaybackService : MediaSessionService() {
         val dev = UsbDac.find(this)
         AppState.dacName = dev?.productName?.toString()
         player.setPreferredAudioDevice(dev)
+        // DSD (DoP) всегда требует bit-perfect; EQ и bit-perfect взаимоисключают друг друга
         val want = Eq.dsd || (AppState.bitPerfectWanted && !Eq.active)
         val r = if (dev != null) UsbDac.setBitPerfect(this, dev, lastRate, want, exact = Eq.dsd)
         else UsbDac.BpResult(false, "USB DAC не найден")
@@ -119,6 +122,7 @@ class PlaybackService : MediaSessionService() {
         AppState.bpInfo = r.info
         AppState.mixerMatched = r.matched
         if (Eq.dsd && !AppState.bitPerfectActive) {
+            // без bit-perfect DoP превратится в шум — не играем
             player.pause()
             AppState.message = "DSD (DoP) требует USB DAC и bit-perfect (Android 14+ и ЦАП с нужной частотой)."
         } else if (AppState.message?.startsWith("DSD") == true) AppState.message = null

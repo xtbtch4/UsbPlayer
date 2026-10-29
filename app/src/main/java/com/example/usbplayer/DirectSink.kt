@@ -22,8 +22,9 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
     private var rate = 0
     private var routing = false
     private var tried = -1
-    private var pending: ByteBuffer? = null
-    private var zero: ByteBuffer = ByteBuffer.allocate(1 shl 15)
+    private var held: ByteBuffer? = null           // исходный буфер, который delegate принял не целиком
+    private var pending: ByteBuffer? = null        // буфер, который сейчас «доедает» delegate (тишина или копия после EQ)
+    private var zero: ByteBuffer = ByteBuffer.allocate(1 shl 15).order(ByteOrder.LITTLE_ENDIAN)
     private var direct: ByteBuffer = ByteBuffer.allocateDirect(1 shl 16)
 
     private fun encOf(e: Int) = when (e) {
@@ -38,7 +39,7 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
         enc = if (inputFormat.sampleMimeType == MimeTypes.AUDIO_RAW) encOf(inputFormat.pcmEncoding) else 0
         ch = inputFormat.channelCount
         rate = inputFormat.sampleRate
-        pending = null
+        pending = null; held = null
         Eq.filter.reset()
         routing = UsbDirect.ready && enc != 0 && UsbDirect.prepare(rate)
         tried = UsbDirect.generation
@@ -47,24 +48,24 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
 
     override fun flush() {
         super.flush()
-        pending = null
+        pending = null; held = null
         Eq.filter.reset()
         if (routing) UsbDirect.flush()
     }
 
     override fun reset() {
         super.reset()
-        pending = null; routing = false; tried = -1
+        pending = null; held = null; routing = false; tried = -1
     }
 
     private fun silence(n: Int): ByteBuffer {
-        if (zero.capacity() < n) zero = ByteBuffer.allocate(n)
+        if (zero.capacity() < n) zero = ByteBuffer.allocate(n).order(ByteOrder.LITTLE_ENDIAN)
         zero.clear(); zero.limit(n)
         return zero
     }
 
     private fun eqCopy(src: ByteBuffer): ByteBuffer {
-        val copy = ByteBuffer.allocate(src.remaining()).order(ByteOrder.nativeOrder())
+        val copy = ByteBuffer.allocate(src.remaining()).order(ByteOrder.LITTLE_ENDIAN)
         copy.put(src.duplicate()); copy.flip()
         Eq.filter.process(copy, enc, ch, rate)
         return copy
@@ -85,10 +86,19 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
 
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
         if (enc == 0) return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        if (held != null) {
+            if (held === buffer) {
+                val done = super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+                if (done) held = null
+                return done
+            }
+            held = null
+        }
         var p = pending
-        if (p == null) {
+        if (p == null) {   // новый входной буфер
             if (!UsbDirect.ready) { routing = false; tried = -1 }
             else if (!routing && tried != UsbDirect.generation) {
+                // драйвер включили, когда трек уже играл: запускаем поток на лету
                 tried = UsbDirect.generation
                 routing = UsbDirect.prepare(rate)
                 if (routing) UsbDirect.flush()
@@ -100,9 +110,13 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
                     if (!pushToUsb(src)) routing = false
                     silence(n)
                 }
-                UsbDirect.ready -> silence(n)
+                UsbDirect.ready -> silence(n)     // драйвер включён, но поток не стартовал (частота не поддерживается): молчим
                 Eq.active -> eqCopy(buffer)
-                else -> return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+                else -> {
+                    val done = super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+                    held = if (done) null else buffer
+                    return done
+                }
             }
             pending = p
         }

@@ -22,6 +22,7 @@ object UsbDirect {
     var status by mutableStateOf(""); private set
     @Volatile var active = false; private set
     @Volatile var name = ""; private set
+    /** Растёт при каждом открытии/закрытии устройства: по нему конвейер понимает, что пора (пере)запустить поток. */
     @Volatile var generation = 0; private set
 
     private var conn: UsbDeviceConnection? = null
@@ -42,6 +43,7 @@ object UsbDirect {
     private external fun nativeSetPlaying(p: Boolean)
     private external fun nativeFlush()
     private external fun nativeInfo(): String
+    private external fun nativeBuffered(): Int
 
     private fun clockId(raw: ByteArray): Int {
         var i = 0; var cls = 0; var sub = 0
@@ -119,6 +121,7 @@ object UsbDirect {
         val c = conn ?: return false
         if (active && rate == curRate) return true
         if (rate !in rates) { status = "ЦАП не поддерживает $rate Гц в прямом режиме"; return false }
+        if (active && rate != curRate) waitDrain()   // дослушать хвост предыдущего трека
         val za = zeroAlt ?: return false
         val ba = bestAlt ?: return false
         stopStream()
@@ -136,6 +139,13 @@ object UsbDirect {
         return true
     }
 
+    private fun waitDrain() {
+        val t0 = System.currentTimeMillis()
+        while (playingHint && nativeBuffered() > 0 && System.currentTimeMillis() - t0 < 2500) {
+            try { Thread.sleep(10) } catch (e: InterruptedException) { break }
+        }
+    }
+
     private fun stopStream() {
         if (active) { nativeStop(); zeroAlt?.let { z -> conn?.setInterface(z) }; active = false; curRate = 0 }
     }
@@ -145,20 +155,19 @@ object UsbDirect {
 
     fun setPlaying(p: Boolean) { playingHint = p; if (active) nativeSetPlaying(p) }
     fun flush() { if (active) nativeFlush() }
-    fun info(): String = if (ready && active) nativeInfo() else ""
+    fun info(): String = if (!ready) "" else if (!active) "поток не запущен, ждёт данные трека" else nativeInfo()
 
     @Synchronized fun markDead() {
-        stopStream(); ready = false; status = "ЦАП отключён"
+        stopStream(); generation++; ready = false; status = "ЦАП отключён"
     }
 
     @Synchronized fun close() {
         stopStream()
-        generation++
         conn?.let { c ->
             zeroAlt?.let { c.releaseInterface(it) }
             c.close()
         }
-        conn = null; ready = false; status = ""
+        conn = null; generation++; ready = false; status = ""
     }
 
     private fun fail(msg: String): Boolean { status = "Прямой USB: $msg"; return false }

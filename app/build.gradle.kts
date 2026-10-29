@@ -10,8 +10,21 @@ android {
     defaultConfig {
         applicationId = "com.example.usbplayer"
         minSdk = 26; targetSdk = 34
-        versionCode = 1; versionName = "0.1"
+        // versionCode растёт с каждым запуском сборки на GitHub, чтобы новая версия всегда ставилась поверх старой
+        val run = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = run; versionName = "0.3.$run"
         ndk { abiFilters += listOf("arm64-v8a") }
+    }
+    // Постоянный ключ подписи (app.p12 создаётся из signing.b64 в workflow): иначе у каждой сборки
+    // на GitHub свой случайный debug-ключ и Android не даёт обновить приложение поверх.
+    val keystoreFile = file("app.p12")
+    signingConfigs {
+        if (keystoreFile.exists()) create("fixed") {
+            storeFile = keystoreFile; storePassword = "usbplayer"; keyAlias = "usbplayer"; keyPassword = "usbplayer"
+        }
+    }
+    buildTypes {
+        getByName("debug") { if (keystoreFile.exists()) signingConfig = signingConfigs.getByName("fixed") }
     }
     externalNativeBuild {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" }

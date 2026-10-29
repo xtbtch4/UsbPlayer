@@ -1,6 +1,8 @@
 package com.example.usbplayer
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -32,6 +34,7 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         Providers.qobuz.load(this)
+        AppState.load(this)
         val factory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
                 context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean
@@ -101,7 +104,7 @@ class PlaybackService : MediaSessionService() {
             override fun onAudioDevicesRemoved(d: Array<out AudioDeviceInfo>) = applyRouting()
         }, null)
 
-        session = MediaSession.Builder(this, player).setCallback(object : MediaSession.Callback {
+        session = MediaSession.Builder(this, player).setSessionActivity(openAppIntent()).setCallback(object : MediaSession.Callback {
             override fun onAddMediaItems(
                 s: MediaSession, c: MediaSession.ControllerInfo, items: MutableList<MediaItem>
             ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(
@@ -110,6 +113,13 @@ class PlaybackService : MediaSessionService() {
         }).build()
         AppState.reapply = ::applyRouting
         applyRouting()
+    }
+
+    private fun openAppIntent(): PendingIntent {
+        val i = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra("open_player", true)
+        return PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun applyRouting() {

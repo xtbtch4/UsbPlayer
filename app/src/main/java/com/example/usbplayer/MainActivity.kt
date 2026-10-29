@@ -26,6 +26,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -66,6 +67,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private var controller by mutableStateOf<MediaController?>(null)
     private var tracks by mutableStateOf<List<Track>>(emptyList())
+    private var openPlayer by mutableStateOf(false)
     /** Очередь, запущенная пользователем: по ней ищем играющий трек (обложка, исполнитель), даже если открыт другой альбом. */
     private var queue by mutableStateOf<List<Track>>(emptyList())
     private lateinit var playlists: Playlists
@@ -82,10 +84,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra("open_player", false)) openPlayer = true
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         playlists = Playlists(this)
         Providers.qobuz.load(this)
+        AppState.load(this)
+        openPlayer = intent?.getBooleanExtra("open_player", false) == true
         val audioPerm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
         perms.launch(arrayOf(audioPerm, Manifest.permission.POST_NOTIFICATIONS))
@@ -204,6 +213,7 @@ class MainActivity : ComponentActivity() {
         }
         LaunchedEffect(loggedIn) { if (loggedIn && home.isEmpty()) loadHome() }
         BackHandler(enabled = qAlbum != null) { qAlbum = null }
+        LaunchedEffect(openPlayer) { if (openPlayer) { expanded = true; openPlayer = false } }
 
         LaunchedEffect(c) {
             while (true) {
@@ -284,7 +294,7 @@ class MainActivity : ComponentActivity() {
                 AppState.message?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (Eq.active) "Bit-perfect (выкл. из-за EQ)" else "Bit-perfect", Modifier.weight(1f))
-                    Switch(AppState.bitPerfectWanted, { AppState.bitPerfectWanted = it; AppState.reapply?.invoke() })
+                    Switch(AppState.bitPerfectWanted, { AppState.bitPerfectWanted = it; AppState.saveBitPerfect(this@MainActivity); AppState.reapply?.invoke() })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Прямой USB (свой драйвер, эксперимент)", Modifier.weight(1f))
@@ -292,7 +302,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (UsbDirect.hasVolume) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Громкость ЦАП", style = MaterialTheme.typography.bodySmall)
-                    Slider(UsbDirect.volume, { UsbDirect.changeVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
+                    Slider(UsbDirect.volume, { UsbDirect.setVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
                     Text("${(UsbDirect.volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
                 }
                 if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
@@ -432,7 +442,9 @@ class MainActivity : ComponentActivity() {
             val dark = Color(accent.red * 0.55f, accent.green * 0.55f, accent.blue * 0.55f)
             val side = LocalConfiguration.current.screenWidthDp.dp - 56.dp
             Column(
-                Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(dark, Color(0xFF0F0D13))))
+                Modifier.fillMaxSize().background(Color(0xFF0F0D13))
+                    .background(Brush.verticalGradient(listOf(dark, Color(0xFF0F0D13))))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
                     .padding(horizontal = 28.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -494,7 +506,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
         if (UsbDirect.ready && UsbDirect.hasVolume && (up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.changeVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
+            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.setVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
             return true
         }
         return super.dispatchKeyEvent(event)

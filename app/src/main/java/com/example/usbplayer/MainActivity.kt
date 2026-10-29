@@ -596,5 +596,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Одиночный файл из проводника (в т.ч. DSF/DFF, которые MediaStore может не индексировать). */
-    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast('/') ?: "Файл", "", "", 0, uri)), 0)
+    private fun playOne(uri: Uri) {
+        val title = uri.lastPathSegment?.substringAfterLast('/') ?: "Файл"
+        val track = Track(id = 0L, title = title, artist = "", album = "", durationMs = 0L, uri = uri)
+        play(listOf(track), 0)
+    }
 }

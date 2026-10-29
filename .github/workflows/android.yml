@@ -20,11 +20,15 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # GitHub-hosted Ubuntu runners already include Android command-line tools.
-      # Avoid setup-android@v3's obsolete "sdkmanager tools" request.
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
       - name: Install Android SDK packages
         shell: bash
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" || yes | "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
 
       - uses: gradle/actions/setup-gradle@v4
         with:

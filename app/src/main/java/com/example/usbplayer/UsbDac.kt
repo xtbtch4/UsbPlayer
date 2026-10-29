@@ -20,6 +20,13 @@ object AppState {
     var bpInfo by mutableStateOf("")
     var mixerMatched by mutableStateOf(false)
     var reapply: (() -> Unit)? = null
+
+    fun load(ctx: Context) {
+        bitPerfectWanted = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("bit_perfect", true)
+    }
+    fun saveBitPerfect(ctx: Context) {
+        ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("bit_perfect", bitPerfectWanted).apply()
+    }
 }
 
 object UsbDac {

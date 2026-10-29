@@ -79,7 +79,7 @@ class MainActivity : ComponentActivity() {
     private val importEq = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
             val text = contentResolver.openInputStream(it)?.bufferedReader()?.use { r -> r.readText() }.orEmpty()
-            val name = it.lastPathSegment?.substringAfterLast('/')?.removeSuffix(".txt") ?: "AutoEQ"
+            val name = it.lastPathSegment?.substringAfterLast(&#x27;/&#x27;)?.removeSuffix(".txt") ?: "AutoEQ"
             if (Eq.load(text, name)) AppState.reapply?.invoke() else AppState.message = "Не удалось разобрать профиль AutoEQ"
         }
     }
@@ -191,6 +191,10 @@ class MainActivity : ComponentActivity() {
         var homeLoading by remember { mutableStateOf(false) }
         var qAlbum by remember { mutableStateOf<QAlbum?>(null) }
         var qTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+        var qArtistName by remember { mutableStateOf<String?>(null) }
+        var qArtistAlbums by remember { mutableStateOf<List<QAlbum>>(emptyList()) }
+        var qArtistLoading by remember { mutableStateOf(false) }
+        var artistFilter by remember { mutableStateOf<String?>(null) }
         val loadHome: () -> Unit = {
             scope.launch {
                 homeLoading = true; error = null
@@ -211,8 +215,21 @@ class MainActivity : ComponentActivity() {
                     .onSuccess { qTracks = it }.onFailure { error = it.message }
             }
         }
+        /** Нажатие на исполнителя: у Qobuz открывается его страница с релизами, у локальных треков — его альбомы в библиотеке. */
+        val openArtist: (Track) -> Unit = { t ->
+            expanded = false
+            if (t.provider == "qobuz" && t.artistId > 0) {
+                tab = 3; qAlbum = null; qArtistName = t.artist; qArtistAlbums = emptyList(); qArtistLoading = true; error = null
+                scope.launch {
+                    runCatching { withContext(Dispatchers.IO) { Providers.qobuz.artistAlbums(t.artistId, t.artist) } }
+                        .onSuccess { qArtistAlbums = it }.onFailure { error = it.message }
+                    qArtistLoading = false
+                }
+            } else { tab = 1; openAlbum = null; artistFilter = t.artist }
+        }
         LaunchedEffect(loggedIn) { if (loggedIn && home.isEmpty()) loadHome() }
         BackHandler(enabled = qAlbum != null) { qAlbum = null }
+        BackHandler(enabled = qAlbum == null && qArtistName != null) { qArtistName = null }
         LaunchedEffect(openPlayer) { if (openPlayer) { expanded = true; openPlayer = false } }
 
         LaunchedEffect(c) {
@@ -232,6 +249,9 @@ class MainActivity : ComponentActivity() {
         }
         BackHandler(enabled = expanded) { expanded = false }
         val albums = remember(tracks) { tracks.groupBy { it.albumKey() }.toList().sortedBy { it.first } }
+        val shownAlbums = if (artistFilter == null) albums else albums.filter { (_, ts) ->
+            ts.any { t -> t.artist.equals(artistFilter, true) || t.albumArtist.equals(artistFilter, true) }
+        }
 
         addTrack?.let { t ->
             AlertDialog(onDismissRequest = { addTrack = null }, confirmButton = {},
@@ -273,7 +293,7 @@ class MainActivity : ComponentActivity() {
                     }
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                         listOf("♫" to "Треки", "▣" to "Альбомы", "☰" to "Плейлисты", "Q" to "Qobuz", "≋" to "EQ").forEachIndexed { i, (ic, n) ->
-                            NavigationBarItem(tab == i, { tab = i; openAlbum = null; openPl = null },
+                            NavigationBarItem(tab == i, { tab = i; openAlbum = null; openPl = null; artistFilter = null },
                                 icon = { Text(ic, fontSize = 20.sp) }, label = { Text(n, maxLines = 1, fontSize = 10.sp) })
                         }
                     }
@@ -302,7 +322,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (UsbDirect.hasVolume) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Громкость ЦАП", style = MaterialTheme.typography.bodySmall)
-                    Slider(UsbDirect.volume, { UsbDirect.changeVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
+                    Slider(UsbDirect.volume, { UsbDirect.setVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
                     Text("${(UsbDirect.volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
                 }
                 if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
@@ -325,8 +345,9 @@ class MainActivity : ComponentActivity() {
                     }
                     1 -> if (openAlbum == null) {
                         LazyColumn {
-                            items(albums) { (key, ts) ->
-                                val (alb, art) = key.split('\u0000')
+                            if (artistFilter != null) item { TextButton({ artistFilter = null }) { Text("✕ Исполнитель: $artistFilter") } }
+                            items(shownAlbums) { (key, ts) ->
+                                val (alb, art) = key.split(&#x27;\u0000&#x27;)
                                 ListItem(
                                     leadingContent = { Cover(ts.first(), 56.dp) },
                                     headlineContent = { Text(alb, maxLines = 1) },
@@ -381,13 +402,13 @@ class MainActivity : ComponentActivity() {
                                     OutlinedTextField(query, { query = it }, label = { Text("Поиск альбомов и треков") }, singleLine = true, modifier = Modifier.weight(1f))
                                     Spacer(Modifier.width(8.dp))
                                     Button({ scope.launch {
-                                        error = null; qAlbum = null
+                                        error = null; qAlbum = null; qArtistName = null
                                         runCatching { withContext(Dispatchers.IO) { Providers.qobuz.searchAll(query) } }
                                             .onSuccess { remoteAlbums = it.first; remote = it.second }.onFailure { error = it.message }
                                     } }) { Text("Найти") }
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton({ query = ""; remote = emptyList(); remoteAlbums = emptyList(); qAlbum = null }) { Text("Главная") }
+                                    TextButton({ query = ""; remote = emptyList(); remoteAlbums = emptyList(); qAlbum = null; qArtistName = null }) { Text("Главная") }
                                     TextButton({
                                         Providers.qobuz.logout(this@MainActivity)
                                         loggedIn = false; remote = emptyList(); remoteAlbums = emptyList(); home = emptyList(); qAlbum = null
@@ -403,6 +424,20 @@ class MainActivity : ComponentActivity() {
                                     TextButton({ qAlbum = null }) { Text("← ${al.title}", maxLines = 1) }
                                     if (qTracks.isEmpty()) Text("Загрузка…", Modifier.padding(16.dp))
                                     LazyColumn { itemsIndexed(qTracks) { i, t -> TrackRow(t, null, {}) { play(qTracks, i) } } }
+                                }
+                                qArtistName != null -> Column {
+                                    TextButton({ qArtistName = null }) { Text("← ${qArtistName}", maxLines = 1) }
+                                    if (qArtistAlbums.isEmpty())
+                                        Text(if (qArtistLoading) "Загрузка…" else "Релизов не найдено", Modifier.padding(16.dp))
+                                    LazyColumn {
+                                        items(qArtistAlbums) { a ->
+                                            ListItem(
+                                                leadingContent = { Cover(a.asTrack(), 56.dp) },
+                                                headlineContent = { Text(a.title, maxLines = 1) },
+                                                supportingContent = { Text(listOf(a.year, a.quality).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 1) },
+                                                modifier = Modifier.clickable { openQ(a) })
+                                        }
+                                    }
                                 }
                                 remote.isNotEmpty() || remoteAlbums.isNotEmpty() -> LazyColumn {
                                     if (remoteAlbums.isNotEmpty()) item { AlbumRow("Альбомы", remoteAlbums, openQ) }
@@ -453,8 +488,12 @@ class MainActivity : ComponentActivity() {
                 Cover(cur, side)
                 Spacer(Modifier.height(24.dp))
                 Text(title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, textAlign = TextAlign.Center)
-                Text(listOfNotNull(cur?.artist, cur?.album?.ifEmpty { null }).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium, color = Color(0xCCFFFFFF), maxLines = 1)
+                cur?.let { t ->
+                    Text(t.artist, Modifier.clickable { openArtist(t) }.padding(vertical = 4.dp),
+                        style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                    if (t.album.isNotEmpty())
+                        Text(t.album, style = MaterialTheme.typography.bodyMedium, color = Color(0xCCFFFFFF), maxLines = 1)
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (AppState.formatInfo.isNotEmpty()) Pill(AppState.formatInfo)
@@ -506,7 +545,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
         if (UsbDirect.ready && UsbDirect.hasVolume && (up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.changeVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
+            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.setVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -557,5 +596,5 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Одиночный файл из проводника (в т.ч. DSF/DFF, которые MediaStore может не индексировать). */
-    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast('/') ?: "Файл", "", "", 0, uri)), 0)
+    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast(&#x27;/&#x27;) ?: "Файл", "", "", 0, uri)), 0)
 }

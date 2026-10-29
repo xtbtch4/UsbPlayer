@@ -10,7 +10,7 @@ data class Track(
     val id: Long, val title: String, val artist: String, val album: String,
     val durationMs: Long, val uri: Uri, val provider: String = "local",
     val genre: String = "", val year: Int = 0, val trackNo: Int = 0, val albumArtist: String = "",
-    val albumId: Long = 0, val art: String = ""
+    val albumId: Long = 0, val art: String = "", val artistId: Long = 0
 )
 
 fun Track.albumKey() = "${album.ifEmpty { "Без альбома" }}\u0000${albumArtist.ifEmpty { artist }}"

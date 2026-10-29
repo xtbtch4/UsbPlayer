@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
 
@@ -17,36 +20,36 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      # GitHub-hosted Ubuntu runners already include Android command-line tools.
+      # Avoid setup-android@v3's obsolete "sdkmanager tools" request.
+      - name: Install Android SDK packages
+        shell: bash
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" || yes | "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Install NDK and CMake
-        run: yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" > /dev/null
-
-      # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Постоянный ключ подписи (чтобы обновления ставились поверх)
+      - name: Persistent signing key
         run: base64 -d app/signing.b64 > app/app.p12
 
       - name: Build debug APK
         shell: bash
         run: gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
 
-      # Если сборка упала, показываем только строки с ошибками прямо на странице запуска (Summary)
-      - name: Ошибки сборки
+      - name: Build errors
         if: failure()
         shell: bash
         run: |
           {
-            echo '## Ошибки сборки'
+            echo '## Build errors'
             echo '```'
             grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
-          name: UsbPlayer-${{ github.run_number }}
+          name: UsbPlayer-debug-apk
           path: app/build/outputs/apk/debug/*.apk

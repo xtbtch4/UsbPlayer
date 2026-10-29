@@ -66,6 +66,8 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private var controller by mutableStateOf<MediaController?>(null)
     private var tracks by mutableStateOf<List<Track>>(emptyList())
+    /** Очередь, запущенная пользователем: по ней ищем играющий трек (обложка, исполнитель), даже если открыт другой альбом. */
+    private var queue by mutableStateOf<List<Track>>(emptyList())
     private lateinit var playlists: Playlists
 
     private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -213,7 +215,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val plNames = remember(plVersion) { playlists.names() }
-        val cur = (tracks + remote + qTracks).find { "${it.provider}:${it.id}" == curId }
+        val cur = (queue + tracks + remote + qTracks).find { "${it.provider}:${it.id}" == curId }
         val accent by produceState(Color(0xFF3B2F5C), cur?.uri) {
             value = cur?.let { t -> withContext(Dispatchers.IO) { Art.load(this@MainActivity, t, 96)?.let(::dominant) } }
                 ?: Color(0xFF3B2F5C)
@@ -538,6 +540,7 @@ class MainActivity : ComponentActivity() {
     private fun play(list: List<Track>, index: Int) {
         val c = controller ?: return
         AppState.message = null
+        queue = list
         c.setMediaItems(list.map(::item), index, 0L); c.prepare(); c.play()
     }
 

@@ -105,8 +105,7 @@ object Eq {
     val filter = EqFilter()
     var enabled by mutableStateOf(false)
     var name by mutableStateOf<String?>(null)
-    var filters by mutableStateOf<List<Peq>>(emptyList())
-    var preamp by mutableDoubleStateOf(0.0)
+    var filters by mutableStateOf<List<Peq>>(emptyList())    var preamp by mutableDoubleStateOf(0.0)
     /** true, пока играет DSD (DoP): обработка запрещена */
     @Volatile var dsd = false
 

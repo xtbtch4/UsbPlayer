@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.Extractor
@@ -38,6 +39,10 @@ class PlaybackService : MediaSessionService() {
                 DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    // длинный буфер «тишины»: ExoPlayer подаёт данные в драйвер с запасом 1–2 с, щелчки от задержек потока исчезают
+                    .setAudioTrackBufferSizeProvider(
+                        DefaultAudioTrackBufferSizeProvider.Builder()
+                            .setMinPcmBufferDurationUs(1_000_000).setMaxPcmBufferDurationUs(2_000_000).build())
                     .build()
             )
         }.setEnableAudioFloatOutput(true)
@@ -76,9 +81,15 @@ class PlaybackService : MediaSessionService() {
                     ?.getTrackFormat(0) ?: return
                 val dsd = f.label?.startsWith("DSD") == true
                 lastRate = f.sampleRate.takeIf { it > 0 }
+                UsbDirect.sourceBits = when (f.pcmEncoding) {
+                    C.ENCODING_PCM_16BIT -> 16
+                    C.ENCODING_PCM_24BIT -> 24
+                    C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT -> 32
+                    else -> 0
+                }
                 Eq.dsd = dsd
                 AppState.formatInfo = if (dsd) "${f.label} · DoP ${f.sampleRate / 1000.0} kHz"
-                else "${f.sampleMimeType?.substringAfter('/')?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
+                else "${f.sampleMimeType?.substringAfter(&#x27;/&#x27;)?.uppercase()} · ${f.sampleRate / 1000.0} kHz" +
                     (f.bitrate.takeIf { it > 0 }?.let { " · ${it / 1000} kbps" } ?: "")
                 applyRouting()
             }
@@ -107,7 +118,10 @@ class PlaybackService : MediaSessionService() {
             AppState.bitPerfectActive = !Eq.active
             AppState.bpInfo = UsbDirect.status
             AppState.mixerMatched = false
-            player.setPreferredAudioDevice(null)
+            // «тишину» для часов ExoPlayer отдаём встроенному динамику: USB-устройство занято драйвером и его маршрут нестабилен
+            val speaker = getSystemService(AudioManager::class.java).getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            player.setPreferredAudioDevice(speaker)
             if (AppState.message?.startsWith("DSD") == true) AppState.message = null
             return
         }

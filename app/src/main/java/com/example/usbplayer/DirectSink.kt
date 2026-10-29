@@ -41,7 +41,7 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
         rate = inputFormat.sampleRate
         pending = null; held = null
         Eq.filter.reset()
-        routing = UsbDirect.ready && enc != 0 && UsbDirect.prepare(rate)
+        routing = UsbDirect.ready && enc != 0 && UsbDirect.prepare(rate, bits())
         tried = UsbDirect.generation
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
@@ -56,6 +56,13 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
     override fun reset() {
         super.reset()
         pending = null; held = null; routing = false; tried = -1
+    }
+
+    /** Разрядность для выбора альтернативной настройки ЦАП: целочисленный вывод декодера точен, для float берём формат дорожки. */
+    private fun bits() = when (enc) {
+        1 -> 16
+        2 -> 24
+        else -> UsbDirect.sourceBits.takeIf { it > 0 } ?: 32
     }
 
     private fun silence(n: Int): ByteBuffer {
@@ -100,7 +107,7 @@ class DirectSink(delegate: AudioSink) : ForwardingAudioSink(delegate) {
             else if (!routing && tried != UsbDirect.generation) {
                 // драйвер включили, когда трек уже играл: запускаем поток на лету
                 tried = UsbDirect.generation
-                routing = UsbDirect.prepare(rate)
+                routing = UsbDirect.prepare(rate, bits())
                 if (routing) UsbDirect.flush()
             }
             val n = buffer.remaining()

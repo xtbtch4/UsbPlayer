@@ -10,22 +10,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Accept Android SDK licenses
-        shell: bash
-        run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
+      # NDK и CMake ставит сама action (sdkmanager в PATH на новых runner-ах может не оказаться: ошибка 127)
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0 ndk;26.1.10909125 cmake;3.22.1"
 
       # В проекте нет gradle wrapper, поэтому ставим Gradle напрямую (AGP 8.5 требует 8.7+)
       - uses: gradle/actions/setup-gradle@v4
@@ -39,16 +34,30 @@ jobs:
         shell: bash
         run: gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
 
-      # Если сборка упала, показываем только строки с ошибками прямо на странице запуска (Summary)
+      # Если сборка упала: ошибки компиляции (файл:строка) выводятся как аннотации, они видны на странице запуска
+      # даже без входа в аккаунт (так их может прочитать и Claude по ссылке на запуск), и дублируются в Summary
       - name: Ошибки сборки
         if: failure()
         shell: bash
         run: |
+          errs=$(grep -E &#x27;^e: &#x27; build.log | head -10 || true)
+          if [ -n "$errs" ]; then
+            while IFS= read -r l; do
+              if [[ $l =~ ^e:\ file://(.*):([0-9]+):([0-9]+)\ (.*)$ ]]; then
+                rel="${BASH_REMATCH[1]#"$GITHUB_WORKSPACE"/}"
+                echo "::error file=$rel,line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]}::${BASH_REMATCH[4]//%/%25}"
+              else
+                echo "::error::${l//%/%25}"
+              fi
+            done <<< "$errs"
+          else
+            grep -E -A3 &#x27;What went wrong|error:&#x27; build.log | head -10 | while IFS= read -r l; do echo "::error::${l//%/%25}"; done || true
+          fi
           {
-            echo '## Ошибки сборки'
-            echo '```'
-            grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
-            echo '```'
+            echo &#x27;## Ошибки сборки&#x27;
+            echo &#x27;```&#x27;
+            grep -E &#x27;^e: |error:|What went wrong|Execution failed&#x27; -A3 build.log | head -80 || true
+            echo &#x27;```&#x27;
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4

@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
  */
 object UsbDirect {
     init { System.loadLibrary("usbaudio") }
+
     var ready by mutableStateOf(false); private set
     var status by mutableStateOf(""); private set
     @Volatile var active = false; private set
@@ -42,15 +43,16 @@ object UsbDirect {
     private var acIf = 0
     private var clockId = 0
     private var zeroAlt: UsbInterface? = null
-    private var bestAlt: UsbInterface? = null
-    private var dataEp = 0
-    private var fbEp = 0
-    private var maxPkt = 0
+    private class Alt(val iface: UsbInterface, val bits: Int, val sub: Int, val maxPkt: Int, val dataEp: Int, val fbEp: Int)
+    private var alts: List<Alt> = emptyList()
+    private var curAlt: Alt? = null
+    /** Разрядность исходного файла (из формата дорожки), 0 — неизвестна. Выставляется при смене трека. */
+    @Volatile var sourceBits = 0
     private var rates: List<Int> = emptyList()
     private var curRate = 0
     @Volatile private var playingHint = false
 
-    private external fun nativeStart(fd: Int, dataEp: Int, fbEp: Int, maxPkt: Int, rate: Int): Boolean
+    private external fun nativeStart(fd: Int, dataEp: Int, fbEp: Int, maxPkt: Int, rate: Int, subslot: Int): Boolean
     private external fun nativeStop()
     private external fun nativeWrite(buf: ByteBuffer, off: Int, len: Int, enc: Int, ch: Int): Int
     private external fun nativeSetPlaying(p: Boolean)
@@ -72,6 +74,29 @@ object UsbDirect {
         return 0
     }
 
+    /** (номер интерфейса, alt) -> (байт на отсчёт, разрядность) из UAC2 Format Type. */
+    private fun formatMap(raw: ByteArray): Map<Int, Pair<Int, Int>> {
+        val m = HashMap<Int, Pair<Int, Int>>()
+        var i = 0; var cls = 0; var sub = 0; var itf = 0; var alt = 0
+        while (i + 2 <= raw.size) {
+            val len = raw[i].toInt() and 255
+            if (len < 2 || i + len > raw.size) break
+            val t = raw[i + 1].toInt() and 255
+            if (t == 4 && len >= 9) {
+                itf = raw[i + 2].toInt() and 255; alt = raw[i + 3].toInt() and 255
+                cls = raw[i + 5].toInt() and 255; sub = raw[i + 6].toInt() and 255
+            }
+            if (t == 0x24 && cls == 1 && sub == 2 && len >= 6 && (raw[i + 2].toInt() and 255) == 2)
+                m[(itf shl 8) or alt] = (raw[i + 4].toInt() and 255) to (raw[i + 5].toInt() and 255)
+            i += len
+        }
+        return m
+    }
+
+    /** Альтернативная настройка под разрядность источника: точное совпадение, иначе ближайшая выше, иначе самая широкая. */
+    private fun pickAlt(bits: Int): Alt? =
+        alts.firstOrNull { it.bits == bits } ?: alts.filter { it.bits >= bits }.minByOrNull { it.bits } ?: alts.maxByOrNull { it.bits }
+
     private fun fmt(r: Int) = if (r % 1000 == 0) "${r / 1000}" else "%.1f".format(r / 1000.0)
 
     @Synchronized fun open(ctx: Context, d: UsbDevice): Boolean {
@@ -80,8 +105,9 @@ object UsbDirect {
         val c = um.openDevice(d) ?: return fail("не удалось открыть устройство")
         val raw = c.rawDescriptors
         clockId = clockId(raw)
-        var ac: UsbInterface? = null; var zero: UsbInterface? = null; var best: UsbInterface? = null
-        var bestPkt = 0; var bestFb = 0
+        val fmts = formatMap(raw)
+        var ac: UsbInterface? = null; var zero: UsbInterface? = null
+        val list = mutableListOf<Alt>()
         for (i in 0 until d.interfaceCount) {
             val f = d.getInterface(i)
             if (f.interfaceClass != UsbConstants.USB_CLASS_AUDIO) continue
@@ -92,14 +118,13 @@ object UsbDirect {
                 val out = eps.firstOrNull { it.type == UsbConstants.USB_ENDPOINT_XFER_ISOC && it.direction == UsbConstants.USB_DIR_OUT }
                     ?: continue
                 val fb = eps.firstOrNull { it.type == UsbConstants.USB_ENDPOINT_XFER_ISOC && it.direction == UsbConstants.USB_DIR_IN }
-                if ((out.maxPacketSize and 0x7FF) > bestPkt) {
-                    best = f; bestPkt = out.maxPacketSize and 0x7FF; dataEp = out.address; bestFb = fb?.address ?: 0
-                }
+                val fm = fmts[(f.id shl 8) or f.alternateSetting] ?: continue
+                list += Alt(f, fm.second, fm.first, out.maxPacketSize and 0x7FF, out.address, fb?.address ?: 0)
             }
         }
-        if (ac == null || best == null || clockId == 0) { c.close(); return fail("не найден аудио-интерфейс или clock source") }
-        val zi: UsbInterface = zero ?: best
-        acIf = ac.id; zeroAlt = zi; bestAlt = best; maxPkt = bestPkt; fbEp = bestFb
+        if (ac == null || list.isEmpty() || clockId == 0) { c.close(); return fail("не найден аудио-интерфейс или clock source") }
+        val zi: UsbInterface = zero ?: list[0].iface
+        acIf = ac.id; zeroAlt = zi; alts = list
         if (!c.claimInterface(ac, true) || !c.claimInterface(zi, true)) { c.close(); return fail("не удалось захватить интерфейсы") }
         conn = c
         rates = queryRates(c)
@@ -205,13 +230,13 @@ object UsbDirect {
     }
 
     /** Переключает ЦАП на частоту трека и (пере)запускает поток. Вызывается из аудио-конвейера. */
-    @Synchronized fun prepare(rate: Int): Boolean {
+    @Synchronized fun prepare(rate: Int, srcBits: Int): Boolean {
         val c = conn ?: return false
-        if (active && rate == curRate) return true
+        val alt = pickAlt(srcBits) ?: return false
+        if (active && rate == curRate && alt === curAlt) return true
         if (rate !in rates) { status = "ЦАП не поддерживает $rate Гц в прямом режиме"; return false }
-        if (active && rate != curRate) waitDrain()   // дослушать хвост предыдущего трека
+        if (active) waitDrain()   // дослушать хвост предыдущего трека
         val za = zeroAlt ?: return false
-        val ba = bestAlt ?: return false
         stopStream()
         c.setInterface(za)
         val d = ByteArray(4) { ((rate shr (8 * it)) and 255).toByte() }
@@ -220,11 +245,11 @@ object UsbDirect {
             status = "не удалось задать частоту $rate Гц"; return false
         }
         try { Thread.sleep(80) } catch (e: InterruptedException) {}
-        if (!c.setInterface(ba)) { status = "не удалось включить альтернативную настройку"; return false }
-        if (!nativeStart(c.fileDescriptor, dataEp, fbEp, maxPkt, rate)) { status = "не удалось запустить поток"; return false }
+        if (!c.setInterface(alt.iface)) { status = "не удалось включить альтернативную настройку"; return false }
+        if (!nativeStart(c.fileDescriptor, alt.dataEp, alt.fbEp, alt.maxPkt, rate, alt.sub)) { status = "не удалось запустить поток"; return false }
         nativeSetPlaying(playingHint)
-        curRate = rate; active = true
-        status = "Прямой USB: $name · ${fmt(rate)} кГц · 32 бит"
+        curRate = rate; curAlt = alt; active = true
+        status = "Прямой USB: $name · ${fmt(rate)} кГц · ${alt.bits} бит"
         return true
     }
 
@@ -236,7 +261,7 @@ object UsbDirect {
     }
 
     private fun stopStream() {
-        if (active) { nativeStop(); zeroAlt?.let { z -> conn?.setInterface(z) }; active = false; curRate = 0 }
+        if (active) { nativeStop(); zeroAlt?.let { z -> conn?.setInterface(z) }; active = false; curRate = 0; curAlt = null }
     }
 
     fun write(buf: ByteBuffer, off: Int, len: Int, enc: Int, ch: Int): Int =

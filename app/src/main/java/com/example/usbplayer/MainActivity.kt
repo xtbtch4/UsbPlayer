@@ -290,7 +290,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (UsbDirect.hasVolume) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Громкость ЦАП", style = MaterialTheme.typography.bodySmall)
-                    Slider(UsbDirect.volume, { UsbDirect.setVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
+                    Slider(UsbDirect.volume, { UsbDirect.changeVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
                     Text("${(UsbDirect.volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
                 }
                 if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
@@ -492,7 +492,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
         if (UsbDirect.ready && UsbDirect.hasVolume && (up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.setVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
+            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.changeVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
             return true
         }
         return super.dispatchKeyEvent(event)

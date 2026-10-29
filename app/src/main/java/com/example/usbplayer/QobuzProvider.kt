@@ -10,7 +10,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
 
-data class QAlbum(val id: String, val title: String, val artist: String, val art: String, val year: String, val quality: String) {
+data class QAlbum(val id: String, val title: String, val artist: String, val art: String, val year: String, val quality: String, val artistId: Long = 0) {
     /** Заглушка-трек, чтобы переиспользовать загрузку обложек. */
     fun asTrack() = Track(0, title, artist, title, 0, Uri.EMPTY, "qobuz", art = art)
 }
@@ -85,11 +85,12 @@ class QobuzProvider {
         return QAlbum(
             a.optString("id"), a.optString("title"), a.optJSONObject("artist")?.optString("name") ?: "",
             img?.optString("large")?.ifEmpty { null } ?: img?.optString("small") ?: "",
-            a.optString("release_date_original").take(4), quality
+            a.optString("release_date_original").take(4), quality,
+            a.optJSONObject("artist")?.optLong("id") ?: 0L
         )
     }
 
-    private fun track(t: JSONObject, albumTitle: String? = null, art: String? = null, artist: String? = null, year: Int = 0): Track {
+    private fun track(t: JSONObject, albumTitle: String? = null, art: String? = null, artist: String? = null, year: Int = 0, albumArtistId: Long = 0): Track {
         val id = t.getLong("id")
         val alb = t.optJSONObject("album")
         return Track(
@@ -100,7 +101,8 @@ class QobuzProvider {
             Uri.parse("qobuz://track/$id"), "qobuz",
             year = year,
             trackNo = t.optInt("media_number", 1) * 1000 + t.optInt("track_number"),
-            art = art ?: alb?.optJSONObject("image")?.optString("small") ?: ""
+            art = art ?: alb?.optJSONObject("image")?.optString("small") ?: "",
+            artistId = t.optJSONObject("performer")?.optLong("id", 0L)?.takeIf { it > 0 } ?: albumArtistId
         )
     }
 
@@ -109,11 +111,18 @@ class QobuzProvider {
         list(get("album/getFeatured", mapOf("type" to type, "limit" to limit.toString()))
             .optJSONObject("albums")?.optJSONArray("items")).map(::album)
 
+    /** Релизы исполнителя (новые сверху). */
+    fun artistAlbums(artistId: Long, artistName: String): List<QAlbum> =
+        list(get("artist/get", mapOf("artist_id" to artistId.toString(), "extra" to "albums", "limit" to "100"))
+            .optJSONObject("albums")?.optJSONArray("items"))
+            .map { album(it).let { al -> if (al.artist.isEmpty()) al.copy(artist = artistName) else al } }
+            .sortedByDescending { it.year }
+
     fun albumTracks(id: String): List<Track> {
         val j = get("album/get", mapOf("album_id" to id))
         val a = album(j)
         return list(j.optJSONObject("tracks")?.optJSONArray("items"))
-            .map { track(it, a.title, a.art, a.artist, a.year.toIntOrNull() ?: 0) }
+            .map { track(it, a.title, a.art, a.artist, a.year.toIntOrNull() ?: 0, a.artistId) }
     }
 
     fun search(query: String): List<Track> =

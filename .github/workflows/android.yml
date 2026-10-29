@@ -40,7 +40,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          errs=$(grep -E &#x27;^e: &#x27; build.log | head -10 || true)
+          errs=$(grep -E '^e: ' build.log | head -10 || true)
           if [ -n "$errs" ]; then
             while IFS= read -r l; do
               if [[ $l =~ ^e:\ file://(.*):([0-9]+):([0-9]+)\ (.*)$ ]]; then
@@ -51,13 +51,13 @@ jobs:
               fi
             done <<< "$errs"
           else
-            grep -E -A3 &#x27;What went wrong|error:&#x27; build.log | head -10 | while IFS= read -r l; do echo "::error::${l//%/%25}"; done || true
+            grep -E -A3 'What went wrong|error:' build.log | head -10 | while IFS= read -r l; do echo "::error::${l//%/%25}"; done || true
           fi
           {
-            echo &#x27;## Ошибки сборки&#x27;
-            echo &#x27;```&#x27;
-            grep -E &#x27;^e: |error:|What went wrong|Execution failed&#x27; -A3 build.log | head -80 || true
-            echo &#x27;```&#x27;
+            echo '## Ошибки сборки'
+            echo '```'
+            grep -E '^e: |error:|What went wrong|Execution failed' -A3 build.log | head -80 || true
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4

@@ -322,7 +322,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (UsbDirect.hasVolume) Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Громкость ЦАП", style = MaterialTheme.typography.bodySmall)
-                    Slider(UsbDirect.volume, { UsbDirect.changeVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
+                    Slider(UsbDirect.volume, { UsbDirect.setVolume(it) }, Modifier.weight(1f).padding(horizontal = 8.dp))
                     Text("${(UsbDirect.volume * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
                 }
                 if (UsbDirect.status.isNotEmpty() || directInfo.isNotEmpty())
@@ -545,7 +545,7 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val up = event.keyCode == KeyEvent.KEYCODE_VOLUME_UP
         if (UsbDirect.ready && UsbDirect.hasVolume && (up || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
-            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.changeVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
+            if (event.action == KeyEvent.ACTION_DOWN) UsbDirect.setVolume(UsbDirect.volume + if (up) 0.03f else -0.03f)
             return true
         }
         return super.dispatchKeyEvent(event)
@@ -596,9 +596,5 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Одиночный файл из проводника (в т.ч. DSF/DFF, которые MediaStore может не индексировать). */
-    private fun playOne(uri: Uri) {
-        val title = uri.lastPathSegment?.substringAfterLast('/') ?: "Файл"
-        val track = Track(id = 0L, title = title, artist = "", album = "", durationMs = 0L, uri = uri)
-        play(listOf(track), 0)
-    }
+    private fun playOne(uri: Uri) = play(listOf(Track(0, uri.lastPathSegment?.substringAfterLast('/') ?: "Файл", "", "", 0, uri)), 0)
 }

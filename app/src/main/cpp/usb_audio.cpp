@@ -40,7 +40,8 @@ struct Urb {
 
 struct State {
     int fd = -1, dataEp = 0, fbEp = 0, maxPkt = 0, rate = 0, sub = 4, outFrame = 8;
-    std::atomic<bool> running{false}, playing{false}, dead{false}, flushReq{false};
+    std::atomic<bool> running{false}, playing{false}, dead{false}, flushReq{false}, armed{false}, eos{false};
+    size_t armBytes = 0;
     pthread_t th{};
     bool thStarted = false;
     uint8_t* ring = nullptr;
@@ -75,9 +76,16 @@ void fillData(Urb& r) {
     int total = 0;
     // статусы предыдущей отправки этого URB (при первой отправке нули)
     for (int i = 0; i < kDataPkts; i++) if (u->iso_frame_desc[i].status != 0) S.isoErrors++;
-    const bool play = S.playing.load(std::memory_order_relaxed);
-    if (S.flushReq.exchange(false))
+    bool play = S.playing.load(std::memory_order_relaxed);
+    if (S.flushReq.exchange(false)) {
         S.tail.store(S.head.load(std::memory_order_acquire), std::memory_order_release);
+        S.armed = false;
+    }
+    if (play && !S.armed.load()) {
+        size_t fill = S.head.load(std::memory_order_acquire) - S.tail.load(std::memory_order_relaxed);
+        if (fill >= S.armBytes || S.eos.load()) S.armed = true;
+    }
+    play = play && S.armed.load();
     const uint32_t maxFrames = (uint32_t)(S.maxPkt / S.outFrame);
     for (int i = 0; i < kDataPkts; i++) {
         S.acc += S.fbQ16;
@@ -207,6 +215,7 @@ Java_com_example_usbplayer_UsbDirect_nativeStart(JNIEnv*, jobject, jint fd, jint
     S.sub = (subslot == 2 || subslot == 3) ? subslot : 4; S.outFrame = 2 * S.sub;
     S.nominal = (uint32_t)(((uint64_t)rate << 16) / 8000);
     S.fbQ16 = S.nominal; S.acc = 0;
+    S.armBytes = (size_t)rate * kFrameBytes / 4; S.armed = false; S.eos = false;
     S.head = 0; S.tail = 0; S.dead = false; S.flushReq = false; S.underruns = 0; S.isoErrors = 0; S.lastFbRaw = 0;
 
     for (auto& r : S.data) {
@@ -281,6 +290,12 @@ JNIEXPORT jint JNICALL
 Java_com_example_usbplayer_UsbDirect_nativeBuffered(JNIEnv*, jobject) {
     return (jint)(S.head.load() - S.tail.load());
 }
+
+JNIEXPORT jlong JNICALL
+Java_com_example_usbplayer_UsbDirect_nativeConsumedBytes(JNIEnv*, jobject) { return (jlong)S.tail.load(); }
+
+JNIEXPORT void JNICALL
+Java_com_example_usbplayer_UsbDirect_nativeSetEos(JNIEnv*, jobject, jboolean e) { S.eos = e; }
 
 JNIEXPORT jstring JNICALL
 Java_com_example_usbplayer_UsbDirect_nativeInfo(JNIEnv* env, jobject) {

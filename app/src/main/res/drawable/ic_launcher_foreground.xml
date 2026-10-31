@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- пластинка -->
+    <path android:fillColor="#2B2347"
+        android:pathData="M24,54a30,30 0 1,0 60,0a30,30 0 1,0 -60,0z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#3D3360" android:strokeWidth="0.9"
+        android:pathData="M29.6,54a24.4,24.4 0 1,0 48.8,0a24.4,24.4 0 1,0 -48.8,0z"/>
+    <path android:fillColor="#00000000" android:strokeColor="#3D3360" android:strokeWidth="0.9"
+        android:pathData="M35.1,54a18.9,18.9 0 1,0 37.8,0a18.9,18.9 0 1,0 -37.8,0z"/>
+    <!-- этикетка и отверстие -->
+    <path android:fillColor="#D0BCFF"
+        android:pathData="M42.9,54a11.1,11.1 0 1,0 22.2,0a11.1,11.1 0 1,0 -22.2,0z"/>
+    <path android:fillColor="#1E1830"
+        android:pathData="M51.2,54a2.8,2.8 0 1,0 5.6,0a2.8,2.8 0 1,0 -5.6,0z"/>
+    <!-- блик -->
+    <path android:fillColor="#00000000" android:strokeColor="#80F3EDFF" android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M31.8,47.3A23.4,23.4 0 0 1 47.3,31.8"/>
+</vector>

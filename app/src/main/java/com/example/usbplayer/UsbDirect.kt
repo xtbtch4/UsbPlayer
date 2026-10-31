@@ -59,6 +59,8 @@ object UsbDirect {
     private external fun nativeFlush()
     private external fun nativeInfo(): String
     private external fun nativeBuffered(): Int
+    private external fun nativeConsumedBytes(): Long
+    private external fun nativeSetEos(e: Boolean)
 
     private fun clockId(raw: ByteArray): Int {
         var i = 0; var cls = 0; var sub = 0
@@ -204,7 +206,7 @@ object UsbDirect {
     }
 
     /** Громкость 0..1 (шкала линейна по дБ в пределах 60 дБ от максимума). */
-    fun changeVolume(f: Float) {
+    fun setVolume(f: Float) {
         volume = f.coerceIn(0f, 1f)
         prefs?.edit()?.putFloat("volume", volume)?.apply()
         vexec.execute { applyVolume() }
@@ -269,6 +271,10 @@ object UsbDirect {
 
     fun setPlaying(p: Boolean) { playingHint = p; if (active) nativeSetPlaying(p) }
     fun flush() { if (active) nativeFlush() }
+    /** Байт, уже отправленных в ЦАП с момента запуска потока (кольцо хранит кадры по 8 байт). */
+    fun consumedBytes(): Long = if (active) nativeConsumedBytes() else 0L
+    fun buffered(): Int = if (active) nativeBuffered() else 0
+    fun setEos(e: Boolean) { if (active) nativeSetEos(e) }
     fun info(): String = if (!ready) "" else if (!active) "поток не запущен, ждёт данные трека" else nativeInfo()
 
     @Synchronized fun markDead() {

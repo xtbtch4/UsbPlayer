@@ -206,7 +206,7 @@ object UsbDirect {
     }
 
     /** Громкость 0..1 (шкала линейна по дБ в пределах 60 дБ от максимума). */
-    fun setVolume(f: Float) {
+    fun changeVolume(f: Float) {
         volume = f.coerceIn(0f, 1f)
         prefs?.edit()?.putFloat("volume", volume)?.apply()
         vexec.execute { applyVolume() }
